@@ -1,0 +1,16 @@
+# Core dependencies for IBVAP-X
+ultralytics>=8.3.0
+supervision>=0.25.0
+shapely>=2.0.0
+folium>=0.16.0
+psycopg[binary]>=3.1.0
+scikit-learn>=1.4.0
+streamlit>=1.35.0
+fastapi>=0.110.0
+uvicorn>=0.30.0
+opencv-python>=4.9.0
+pydantic-settings>=2.2.0
+sqlalchemy>=2.0.0
+argon2-cffi>=23.1.0
+python-dotenv>=1.0.0
+requests>=2.31.0
