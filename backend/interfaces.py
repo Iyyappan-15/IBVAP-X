@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import List, Tuple, Dict, Any, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 import numpy as np
 
 # Enums
@@ -51,15 +51,14 @@ class AnomalyStatus(str, Enum):
 
 # Frame Schema
 class Frame(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     camera_id: str
     frame_id: int
     timestamp: float = Field(default_factory=lambda: datetime.now().timestamp())
     frame_bytes: Optional[bytes] = None  # JPEG bytes or reference
     source_type: str = "file"  # file | webcam | rtsp | demo
     source_metadata: Dict[str, Any] = Field(default_factory=dict)
-
-    class Config:
-        arbitrary_types_allowed = True
 
 # Detection Output Schema
 class Detection(BaseModel):
