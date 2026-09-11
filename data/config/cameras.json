@@ -1,0 +1,73 @@
+{
+  "cameras": [
+    {
+      "camera_id": "CAM-01",
+      "name": "North Boundary Gate - Alpha",
+      "location_description": "Sector 4 North Perimeter Fence",
+      "latitude": 31.6215,
+      "longitude": 74.8752,
+      "heading_degrees": 45.0,
+      "fov_degrees": 65.0,
+      "range_meters": 150.0,
+      "adjacent_cameras": ["CAM-02"],
+      "boundary_vector": [0.0, -1.0],
+      "zones": [
+        {
+          "zone_name": "Restricted Sector Alpha",
+          "polygon_normalized": [
+            [0.2, 0.2],
+            [0.8, 0.2],
+            [0.8, 0.8],
+            [0.2, 0.8]
+          ]
+        }
+      ]
+    },
+    {
+      "camera_id": "CAM-02",
+      "name": "Central Ridge Watchtower",
+      "location_description": "Sector 4 Central Elevated Post",
+      "latitude": 31.6230,
+      "longitude": 74.8780,
+      "heading_degrees": 90.0,
+      "fov_degrees": 70.0,
+      "range_meters": 180.0,
+      "adjacent_cameras": ["CAM-01", "CAM-03"],
+      "boundary_vector": [0.0, -1.0],
+      "zones": [
+        {
+          "zone_name": "Buffer Zone Bravo",
+          "polygon_normalized": [
+            [0.3, 0.1],
+            [0.9, 0.1],
+            [0.9, 0.7],
+            [0.3, 0.7]
+          ]
+        }
+      ]
+    },
+    {
+      "camera_id": "CAM-03",
+      "name": "East Riverine Outpost",
+      "location_description": "Sector 4 Riverine Border Marker 12",
+      "latitude": 31.6260,
+      "longitude": 74.8820,
+      "heading_degrees": 135.0,
+      "fov_degrees": 60.0,
+      "range_meters": 140.0,
+      "adjacent_cameras": ["CAM-02"],
+      "boundary_vector": [0.0, -1.0],
+      "zones": [
+        {
+          "zone_name": "Restricted Waterway Delta",
+          "polygon_normalized": [
+            [0.1, 0.3],
+            [0.7, 0.3],
+            [0.7, 0.9],
+            [0.1, 0.9]
+          ]
+        }
+      ]
+    }
+  ]
+}
