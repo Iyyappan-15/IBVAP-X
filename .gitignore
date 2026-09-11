@@ -52,3 +52,8 @@ data/evidence/*.jpg
 *.swp
 .DS_Store
 Thumbs.db
+
+# Uploaded video temp files (keep folder, ignore contents)
+data/uploads_temp/*.mp4
+data/uploads_temp/*.avi
+data/uploads_temp/*.mov

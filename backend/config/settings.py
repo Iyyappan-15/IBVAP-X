@@ -83,6 +83,17 @@ class Settings(BaseSettings):
     # Security & CORS
     CORS_ORIGINS: str = "http://localhost:8501,http://127.0.0.1:8501"
 
+    # Video Upload & Processing Limits (configurable — see addendum)
+    MAX_UPLOAD_SIZE_MB: int = 200
+    MAX_VIDEO_DURATION_SECONDS: int = 180
+    MIN_VIDEO_DURATION_SECONDS: int = 5
+    PROCESS_FPS: float = 5.0
+    DISPLAY_FPS: float = 5.0
+    MAX_INFERENCE_WIDTH: int = 1280
+    MAX_INFERENCE_HEIGHT: int = 720
+    UPLOAD_CAMERA_ID: str = "CAM-UPLOAD-01"
+    VIDEO_TEMP_DIR: str = "data/uploads_temp"
+
     @property
     def detect_classes_list(self) -> List[str]:
         return [c.strip() for c in self.YOLO_DETECT_CLASSES.split(",") if c.strip()]
