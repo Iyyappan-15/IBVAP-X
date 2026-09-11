@@ -38,10 +38,11 @@ venv.bak/
 data/ibvapx_local.db
 
 # Large media & model weights (Do not commit binary video files)
+*.pt
+data/models/*.pt
 data/demo/*.mp4
 data/demo/*.avi
 data/demo/*.mov
-data/models/*.pt
 data/evidence/*.mp4
 data/evidence/*.jpg
 
