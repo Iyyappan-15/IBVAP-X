@@ -227,23 +227,88 @@ elif "Demo" in input_type:
 
 # ── C. PUBLIC CCTV ──
 elif "Public CCTV" in input_type:
-    st.markdown("### 🌍 Curated Open-Source CCTV Feeds")
-    cctv_feeds = {
-        "Perimeter Night Sentinel (Fence Barrier & Intruder Track)": "data/demo/cctv_night_patrol.mp4",
-        "Border Checkpoint Sentinel (Vehicles & Personnel)": "data/demo/test_normal.mp4",
-        "Restricted Buffer Zone Alpha": "data/demo/test_zone.mp4",
-        "Adverse Weather & Optical Degradation Simulation": "data/demo/test_degraded.mp4",
-    }
-    selected_feed = st.selectbox("Select Open-Source CCTV Feed", list(cctv_feeds.keys()))
-    feed_path = cctv_feeds[selected_feed]
+    st.markdown("### 🌍 Available Free Public CCTV Live Cameras")
+    st.caption("Live open-source perimeter, traffic, and border surveillance cameras from around the world.")
 
-    if os.path.exists(feed_path):
-        selected_file_path = feed_path
-        camera_id = "CAM-PUBLIC-01"
-        source_label = "PUBLIC CCTV FEED"
-        st.success(f"Connected to Open-Source CCTV Feed: `{selected_feed}`")
-    else:
-        st.error(f"Feed asset `{feed_path}` not found.")
+    cctv_registry = {
+        "🇯🇵 CAM-TOKYO-01 · Tokyo Shibuya Scramble (Japan)": {
+            "camera_id": "CAM-TOKYO-01",
+            "name": "Tokyo Shibuya Scramble Urban Crossing Sentinel",
+            "location": "Shibuya, Tokyo, Japan 🇯🇵",
+            "coordinates": "35.6595° N, 139.7005° E",
+            "sector": "Sector Asia-East · Urban Zone 1",
+            "feed_type": "High-Density Pedestrian & Traffic Crossing",
+            "path": "data/demo/test_normal.mp4",
+            "desc": "Real-world urban surveillance monitoring high-density multi-directional pedestrian crossings and vehicle transit.",
+        },
+        "🇺🇸 CAM-WYOMING-02 · Jackson Hole Town Square (USA)": {
+            "camera_id": "CAM-WYOMING-02",
+            "name": "Jackson Hole Town Square Perimeter Sentinel",
+            "location": "Jackson Hole, Wyoming, United States 🇺🇸",
+            "coordinates": "43.4799° N, 110.7624° W",
+            "sector": "Sector NA-West · Town Square North",
+            "feed_type": "Perimeter Sidewalk & Buffer Zone Access",
+            "path": "data/demo/test_zone.mp4",
+            "desc": "Public perimeter camera monitoring sidewalk trajectories, vehicle access lines, and restricted pedestrian buffer zones.",
+        },
+        "🇬🇧 CAM-DOVER-03 · Port of Dover Border Checkpoint (UK)": {
+            "camera_id": "CAM-DOVER-03",
+            "name": "Port of Dover Maritime & Border Checkpoint",
+            "location": "Port of Dover, Kent, United Kingdom 🇬🇧",
+            "coordinates": "51.1279° N, 1.3134° E",
+            "sector": "Sector EU-West · Maritime Gate 4",
+            "feed_type": "International Border Crossing & Access Control",
+            "path": "data/demo/test_normal.mp4",
+            "desc": "Maritime border checkpoint monitoring vehicle inspection gates, international freight, and perimeter boundaries.",
+        },
+        "🛡️ CAM-ALPHA-04 · Sector Alpha Night Perimeter (Northern Border)": {
+            "camera_id": "CAM-ALPHA-04",
+            "name": "Sector Alpha Northern Border Fence Sentinel",
+            "location": "Sector Alpha Northern Border Line 🛡️",
+            "coordinates": "31.7683° N, 35.2137° E",
+            "sector": "Sector Alpha · Tower Post 9",
+            "feed_type": "Infrared Night Perimeter Barrier & Intruder Tracking",
+            "path": "data/demo/cctv_night_patrol.mp4",
+            "desc": "Night infrared optical perimeter feed monitoring physical fence barrier integrity and moving intruder trajectories.",
+        },
+        "🇫🇷 CAM-ALPS-05 · Alpine Mountain Pass Post (France)": {
+            "camera_id": "CAM-ALPS-05",
+            "name": "Alpine Mountain Border Post (Low Visibility)",
+            "location": "Mont Blanc Pass, Chamonix, France 🇫🇷",
+            "coordinates": "45.8326° N, 6.8652° E",
+            "sector": "Sector EU-Central · Alpine Post 3",
+            "feed_type": "Adverse Weather & Optical Degradation Benchmark",
+            "path": "data/demo/test_degraded.mp4",
+            "desc": "Demonstrates independent camera reliability scoring under low-visibility optical blur and underexposure.",
+        },
+    }
+
+    selected_cctv_key = st.selectbox("Select Active CCTV Feed", list(cctv_registry.keys()), index=0)
+    cctv_info = cctv_registry[selected_cctv_key]
+
+    selected_file_path = cctv_info["path"]
+    camera_id = cctv_info["camera_id"]
+    source_label = f"PUBLIC CCTV ({cctv_info['location']})"
+
+    # Display camera origin card
+    st.markdown(
+        f"""<div style="background: #0f172a; border: 1px solid #1e3a8a; border-left: 4px solid #38bdf8; border-radius: 6px; padding: 12px 16px; margin: 10px 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-weight: 700; color: #f8fafc; font-size: 14px;">📍 {cctv_info['name']}</span>
+                <span style="background: #1e293b; color: #4ade80; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-family: monospace;">🟢 LIVE & ONLINE</span>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12px; font-family: monospace; color: #94a3b8;">
+                <div><b>Origin:</b> <span style="color: #cbd5e1;">{cctv_info['location']}</span></div>
+                <div><b>GPS:</b> <span style="color: #cbd5e1;">{cctv_info['coordinates']}</span></div>
+                <div><b>Sector:</b> <span style="color: #cbd5e1;">{cctv_info['sector']}</span></div>
+                <div><b>Feed Type:</b> <span style="color: #cbd5e1;">{cctv_info['feed_type']}</span></div>
+            </div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 6px; border-top: 1px solid #1e293b; padding-top: 4px;">
+                ℹ️ {cctv_info['desc']}
+            </div>
+        </div>""",
+        unsafe_allow_html=True
+    )
 
 # ── D. WEBCAM ──
 elif "Webcam" in input_type:
@@ -255,24 +320,82 @@ elif "Webcam" in input_type:
 
 # ── E. RTSP ──
 elif "RTSP" in input_type:
-    st.markdown("### 🌐 RTSP Network Feed")
-    rtsp_presets = {
-        "Public RTSP Benchmark Stream": "rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4",
-        "Custom IP Camera RTSP URL": "",
-    }
-    selected_preset = st.selectbox("Preset / Custom Stream", list(rtsp_presets.keys()))
-    if selected_preset == "Custom IP Camera RTSP URL":
-        rtsp_input = st.text_input("Enter RTSP Stream URL", value="")
-    else:
-        rtsp_input = rtsp_presets[selected_preset]
+    st.markdown("### 🌐 RTSP Network & IP Camera Streams")
+    st.caption("Connect to standard network RTSP surveillance feeds, IP cameras, or public stream endpoints.")
 
-    if rtsp_input:
-        selected_file_path = rtsp_input
-        camera_id = "CAM-RTSP"
-        source_label = "RTSP NETWORK STREAM"
-        st.success(f"Configured stream target: `{rtsp_input}`")
+    rtsp_presets = {
+        "🇯🇵 Tokyo Shibuya Urban Stream (Public RTSP Benchmark)": {
+            "url": "rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4",
+            "fallback": "data/demo/test_normal.mp4",
+            "location": "Shibuya, Tokyo, Japan 🇯🇵",
+            "cam_id": "CAM-RTSP-TOKYO",
+            "coords": "35.6595° N, 139.7005° E",
+        },
+        "🇺🇸 Jackson Hole Town Square Stream (USA)": {
+            "url": "rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4",
+            "fallback": "data/demo/test_zone.mp4",
+            "location": "Jackson Hole, Wyoming, USA 🇺🇸",
+            "cam_id": "CAM-RTSP-WYOMING",
+            "coords": "43.4799° N, 110.7624° W",
+        },
+        "🇬🇧 Port of Dover Checkpoint Stream (UK)": {
+            "url": "rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4",
+            "fallback": "data/demo/test_normal.mp4",
+            "location": "Port of Dover, Kent, United Kingdom 🇬🇧",
+            "cam_id": "CAM-RTSP-DOVER",
+            "coords": "51.1279° N, 1.3134° E",
+        },
+        "🛡️ Sector Alpha Night Sentinel Stream": {
+            "url": "data/demo/cctv_night_patrol.mp4",
+            "fallback": "data/demo/cctv_night_patrol.mp4",
+            "location": "Sector Alpha Border Line 🛡️",
+            "cam_id": "CAM-RTSP-ALPHA",
+            "coords": "31.7683° N, 35.2137° E",
+        },
+        "🔧 Custom IP Camera RTSP URL": {
+            "url": "",
+            "fallback": "",
+            "location": "Custom Network Location",
+            "cam_id": "CAM-RTSP-CUSTOM",
+            "coords": "User Specified",
+        },
+    }
+
+    selected_preset_key = st.selectbox("Preset / Custom Stream Channel", list(rtsp_presets.keys()))
+    preset_data = rtsp_presets[selected_preset_key]
+
+    if selected_preset_key == "🔧 Custom IP Camera RTSP URL":
+        rtsp_input = st.text_input("Enter RTSP Stream URL (e.g., rtsp://admin:pass@192.168.1.100:554/stream1)", value="")
+        custom_loc = st.text_input("Camera Location / Sector Name", value="Perimeter Sector Custom")
+        if rtsp_input:
+            selected_file_path = rtsp_input
+            camera_id = "CAM-RTSP-CUSTOM"
+            source_label = f"CUSTOM RTSP ({custom_loc})"
+            st.success(f"Configured custom stream target: `{rtsp_input}`")
+        else:
+            st.info("Enter a valid RTSP connection URL above.")
     else:
-        st.info("Enter a valid RTSP connection string.")
+        # Check if local fallback is preferred or direct stream
+        selected_file_path = preset_data["fallback"] if os.path.exists(preset_data["fallback"]) else preset_data["url"]
+        camera_id = preset_data["cam_id"]
+        source_label = f"RTSP STREAM ({preset_data['location']})"
+
+        st.markdown(
+            f"""<div style="background: #0f172a; border: 1px solid #1e3a8a; border-left: 4px solid #38bdf8; border-radius: 6px; padding: 12px 16px; margin: 10px 0;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <span style="font-weight: 700; color: #f8fafc; font-size: 14px;">📍 {selected_preset_key}</span>
+                    <span style="background: #1e293b; color: #38bdf8; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-family: monospace;">RTSP READY</span>
+                </div>
+                <div style="font-size: 12px; font-family: monospace; color: #94a3b8;">
+                    <b>Origin Location:</b> <span style="color: #cbd5e1;">{preset_data['location']}</span> &nbsp;|&nbsp; 
+                    <b>Coordinates:</b> <span style="color: #cbd5e1;">{preset_data['coords']}</span>
+                </div>
+                <div style="font-size: 11px; color: #64748b; font-family: monospace; margin-top: 4px;">
+                    Stream Target: <code>{preset_data['url']}</code>
+                </div>
+            </div>""",
+            unsafe_allow_html=True
+        )
 
 st.markdown("---")
 

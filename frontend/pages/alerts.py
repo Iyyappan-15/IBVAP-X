@@ -94,15 +94,28 @@ STATE_BADGES = {
     "ESCALATED":    "⬆️ ESCALATED",
 }
 
-for alert in demo_alerts:
+# Deduplicate alerts or ensure uniqueness
+seen_ids = set()
+unique_demo_alerts = []
+for idx, a in enumerate(demo_alerts):
+    a_id = a.get("alert_id", f"ALT-{idx+1}")
+    if a_id in seen_ids:
+        a_id = f"{a_id}-{idx+1}"
+        a["alert_id"] = a_id
+    seen_ids.add(a_id)
+    unique_demo_alerts.append(a)
+
+for idx, alert in enumerate(unique_demo_alerts):
+    a_id = alert["alert_id"]
+    current_state = st.session_state.get("operator_actions", {}).get(a_id, {}).get("status", alert["state"])
     icon = PRIORITY_COLOURS.get(alert["event_priority"], "⚪")
-    state_badge = STATE_BADGES.get(alert["state"], alert["state"])
+    state_badge = STATE_BADGES.get(current_state, current_state)
     header = (
-        f"{icon} [{alert['event_priority']}] Alert #{alert['alert_id']} "
+        f"{icon} [{alert['event_priority']}] Alert #{a_id} "
         f"— Camera {alert['camera_id']} | {alert['class_name'].upper()} | {alert['time_str']} | {state_badge}"
     )
 
-    with st.expander(header, expanded=(alert["state"] == "ACTIVE")):
+    with st.expander(header, expanded=(current_state == "ACTIVE")):
         col1, col2, col3 = st.columns(3)
 
         with col1:
@@ -160,21 +173,47 @@ for alert in demo_alerts:
         st.info(f"💡 **Recommended Action:** {alert['action_recommendation']}")
 
         # Operator verification actions
-        c_ack, c_rej, c_unc, c_timer = st.columns([1, 1, 1, 2])
+        c_ack, c_rej, c_unc, c_esc = st.columns([1, 1, 1, 1])
         with c_ack:
-            if st.button("✅ CONFIRM", key=f"ack_{alert['alert_id']}"):
-                AuditLogger().log_event("OPERATOR_ACTION", "OPERATOR-01", alert["alert_id"], "Confirmed alert.")
-                st.success("Alert ACKNOWLEDGED by operator.")
+            if st.button("✅ CONFIRM", key=f"ack_{a_id}_{idx}", use_container_width=True):
+                st.session_state.setdefault("operator_actions", {})[a_id] = {
+                    "status": "CONFIRMED & ACKNOWLEDGED",
+                    "operator": "OPERATOR-01",
+                    "time": datetime.now().strftime("%H:%M:%S UTC"),
+                }
+                AuditLogger().log_event("OPERATOR_ACTION", "OPERATOR-01", a_id, "Confirmed alert.")
+                st.success("Alert CONFIRMED by operator.")
+                st.rerun()
         with c_rej:
-            if st.button("❌ REJECT", key=f"rej_{alert['alert_id']}"):
-                AuditLogger().log_event("OPERATOR_ACTION", "OPERATOR-01", alert["alert_id"], "Rejected alert (false positive).")
+            if st.button("❌ REJECT", key=f"rej_{a_id}_{idx}", use_container_width=True):
+                st.session_state.setdefault("operator_actions", {})[a_id] = {
+                    "status": "REJECTED (FALSE ALARM)",
+                    "operator": "OPERATOR-01",
+                    "time": datetime.now().strftime("%H:%M:%S UTC"),
+                }
+                AuditLogger().log_event("OPERATOR_ACTION", "OPERATOR-01", a_id, "Rejected alert (false positive).")
                 st.info("Alert REJECTED — logged as false positive.")
+                st.rerun()
         with c_unc:
-            if st.button("❓ UNCERTAIN", key=f"unc_{alert['alert_id']}"):
-                AuditLogger().log_event("OPERATOR_ACTION", "OPERATOR-01", alert["alert_id"], "Marked alert uncertain.")
+            if st.button("❓ UNCERTAIN", key=f"unc_{a_id}_{idx}", use_container_width=True):
+                st.session_state.setdefault("operator_actions", {})[a_id] = {
+                    "status": "UNCERTAIN (FLAGGED)",
+                    "operator": "OPERATOR-01",
+                    "time": datetime.now().strftime("%H:%M:%S UTC"),
+                }
+                AuditLogger().log_event("OPERATOR_ACTION", "OPERATOR-01", a_id, "Marked alert uncertain.")
                 st.warning("Alert marked UNCERTAIN — flagged for supervisor review.")
-        with c_timer:
-            st.markdown("⏱️ Escalation Policy: **Auto-escalates in 30s if unacknowledged**")
+                st.rerun()
+        with c_esc:
+            if st.button("🚨 ESCALATE", key=f"esc_{a_id}_{idx}", use_container_width=True):
+                st.session_state.setdefault("operator_actions", {})[a_id] = {
+                    "status": "ESCALATED TO COMMAND",
+                    "operator": "OPERATOR-01",
+                    "time": datetime.now().strftime("%H:%M:%S UTC"),
+                }
+                AuditLogger().log_event("OPERATOR_ACTION", "OPERATOR-01", a_id, "Escalated to Command.")
+                st.error("Alert ESCALATED to Command.")
+                st.rerun()
 
 st.markdown("---")
 st.caption(

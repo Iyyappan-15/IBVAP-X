@@ -35,24 +35,26 @@ class VideoSource(ABC):
 
 
 class FileVideoSource(VideoSource):
-    """Video Source implementation for Uploaded MP4/AVI Files."""
+    """Video Source implementation for Local Files and HTTP/HTTPS/RTSP Video Streams."""
 
     def __init__(self, file_path: str, camera_id: str = "CAM-FILE"):
         super().__init__(camera_id=camera_id)
         self.file_path = file_path
 
-        if not os.path.exists(file_path):
+        is_url = file_path.startswith("http://") or file_path.startswith("https://") or file_path.startswith("rtsp://")
+        if not is_url and not os.path.exists(file_path):
             raise VideoSourceError(f"Video file not found at path: {file_path}")
 
         self.cap = cv2.VideoCapture(file_path)
         if not self.cap.isOpened():
-            raise VideoSourceError(f"Failed to open video file: {file_path}")
+            raise VideoSourceError(f"Failed to open video source: {file_path}")
 
         self.is_connected = True
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
         self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        raw_tf = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.total_frames = raw_tf if raw_tf > 0 else 500
 
     def get_frame(self) -> Optional[Frame]:
         if not self.is_connected or not self.cap.isOpened():
