@@ -62,12 +62,19 @@ class ObjectDetector:
                 return []
 
         # Run inference
+        # iou=0.45  : strict NMS — merges overlapping boxes of the SAME object
+        #             (default 0.7 is too permissive; causes 1 car → 2 boxes)
+        # agnostic_nms=True : also suppresses cross-class overlaps
+        #                     (prevents car box swallowing a person box next to it)
         results = self.model(
             image_np,
             conf=self.confidence_threshold,
+            iou=0.45,
+            agnostic_nms=True,
             classes=self.target_class_ids if self.target_class_ids else None,
             verbose=False
         )
+
 
         detections: List[Detection] = []
 
