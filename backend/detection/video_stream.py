@@ -144,11 +144,19 @@ class RTSPVideoSource(VideoSource):
         self.rtsp_url = rtsp_url
         self.cap = cv2.VideoCapture(rtsp_url)
 
+        self.fps = 25.0
+        self.total_frames = 500
         if not self.cap.isOpened():
             logger.warning(f"Failed to connect to RTSP stream: {rtsp_url}")
             self.is_connected = False
         else:
             self.is_connected = True
+            raw_fps = self.cap.get(cv2.CAP_PROP_FPS)
+            if raw_fps and raw_fps > 0:
+                self.fps = raw_fps
+            raw_tf = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if raw_tf and raw_tf > 0:
+                self.total_frames = raw_tf
 
     def get_frame(self) -> Optional[Frame]:
         if not self.is_connected:

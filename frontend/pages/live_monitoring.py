@@ -41,7 +41,7 @@ import numpy as np
 import streamlit as st
 
 from backend.config.settings import settings
-from backend.detection.video_stream import FileVideoSource, DemoVideoSource
+from backend.detection.video_stream import FileVideoSource, DemoVideoSource, RTSPVideoSource, WebcamVideoSource
 from backend.pipeline import IBVAPXPipeline
 from backend.upload.video_validator import validate_upload, resize_for_inference
 from backend.upload.safe_temp_storage import (
@@ -232,9 +232,10 @@ if "Upload" in input_type:
 elif "Demo" in input_type:
     st.markdown("### 🎬 Demo Scenario Video")
     demo_options = {
-        "Scenario 1: Normal Patrol Activity (CAM-01)": "data/demo/test_normal.mp4",
-        "Scenario 2: Restricted Zone Entry (CAM-02)": "data/demo/test_zone.mp4",
-        "Scenario 3: Degraded Camera Feed (CAM-03)": "data/demo/test_degraded.mp4",
+        "Scenario 1: Real-World Night Perimeter Surveillance (Fence & Moving Pedestrian)": "data/demo/cctv_night_patrol.mp4",
+        "Scenario 2: Normal Patrol Activity (CAM-01)": "data/demo/test_normal.mp4",
+        "Scenario 3: Restricted Zone Entry (CAM-02)": "data/demo/test_zone.mp4",
+        "Scenario 4: Degraded Camera Feed (CAM-03)": "data/demo/test_degraded.mp4",
     }
     selected_demo = st.selectbox("Select Demo Scenario", list(demo_options.keys()))
     demo_path = demo_options[selected_demo]
@@ -253,16 +254,31 @@ elif "Demo" in input_type:
 # ── C. WEBCAM ─────────────────────────────────────────────────────────────────
 elif "Webcam" in input_type:
     st.markdown("### 📷 Webcam Live Feed")
-    st.info("Webcam input is supported by the pipeline architecture (WebcamVideoSource).")
+    st.info("Connects to local USB or laptop webcam (Device Index 0).")
+    selected_file_path = "0"
     camera_id = "CAM-WEBCAM"
     source_label = "WEBCAM FEED"
 
 # ── D. RTSP ────────────────────────────────────────────────────────────────────
 elif "RTSP" in input_type:
     st.markdown("### 🌐 RTSP Network Stream")
-    st.info("RTSP support is built into the VideoSource abstraction (RTSPVideoSource).")
-    camera_id = "CAM-RTSP"
-    source_label = "RTSP STREAM"
+    rtsp_presets = {
+        "Wowza 24/7 RTSP Test Stream": "rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4",
+        "Custom RTSP / IP Camera URL": "",
+    }
+    selected_preset = st.selectbox("Select Stream Preset or Enter Custom", list(rtsp_presets.keys()))
+    if selected_preset == "Custom RTSP / IP Camera URL":
+        rtsp_input = st.text_input("Enter RTSP Stream URL (e.g. from IP Webcam app: rtsp://192.168.1.X:8080/h264_pcm.sdp)", value="")
+    else:
+        rtsp_input = rtsp_presets[selected_preset]
+
+    if rtsp_input:
+        selected_file_path = rtsp_input
+        camera_id = "CAM-RTSP"
+        source_label = "RTSP STREAM"
+        st.success(f"RTSP stream configured: `{rtsp_input}`")
+    else:
+        st.info("Enter an RTSP URL or select a preset above to connect.")
 
 st.markdown("---")
 
@@ -302,7 +318,12 @@ if start_clicked and selected_file_path:
     init_error = None
 
     try:
-        source = FileVideoSource(file_path=selected_file_path, camera_id=camera_id)
+        if "RTSP" in input_type:
+            source = RTSPVideoSource(rtsp_url=selected_file_path, camera_id=camera_id)
+        elif "Webcam" in input_type:
+            source = WebcamVideoSource(device_index=0, camera_id=camera_id)
+        else:
+            source = FileVideoSource(file_path=selected_file_path, camera_id=camera_id)
         pipeline = IBVAPXPipeline(enable_demo_degradation=demo_degraded)
     except Exception as e:
         init_error = str(e)
