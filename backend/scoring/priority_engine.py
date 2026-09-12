@@ -26,9 +26,9 @@ class PriorityEngine:
         score = 0.0
         reasons: List[str] = []
 
-        # 1. Restricted Zone Entry (+30)
+        # 1. Restricted Zone Entry (+45 base -> guarantees at least MEDIUM priority alert)
         if context_event.in_restricted_zone:
-            score += 30.0
+            score += 45.0
             z_label = context_event.zone_name or "Restricted Zone"
             reasons.append(f"Restricted zone entry detected ({z_label})")
 

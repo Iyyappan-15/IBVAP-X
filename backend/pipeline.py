@@ -62,10 +62,10 @@ class IBVAPXPipeline:
             image_np=image_np
         )
 
-        # 2. Object Detection
+        # 2. Object Detection (with Sub-Box Containment Suppression)
         detections = self.detector.detect(frame_obj, image_np=image_np)
 
-        # 3. Multi-Object Tracking
+        # 3. Multi-Object Tracking (ByteTrack / IoU Fallback)
         tracks = self.tracker.update(detections, timestamp=frame_obj.timestamp)
 
         new_alerts: List[AlertOutput] = []
@@ -100,14 +100,15 @@ class IBVAPXPipeline:
                 anomaly_score=anom_score
             )
 
-            if alert and alert.event_priority in [EventPriority.HIGH, EventPriority.CRITICAL]:
+            if alert:
                 # 8. Evidence Auto-Capture for High/Critical Alerts
-                pre_frames = self.ring_buffer.get_buffered_frames()
-                self.evidence_capturer.capture_evidence(
-                    alert=alert,
-                    pre_event_frames=pre_frames,
-                    current_frame_img=image_np
-                )
+                if alert.event_priority in [EventPriority.HIGH, EventPriority.CRITICAL]:
+                    pre_frames = self.ring_buffer.get_buffered_frames()
+                    self.evidence_capturer.capture_evidence(
+                        alert=alert,
+                        pre_event_frames=pre_frames,
+                        current_frame_img=image_np
+                    )
                 new_alerts.append(alert)
 
         # Draw visual tracking overlay
