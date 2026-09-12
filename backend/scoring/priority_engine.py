@@ -71,3 +71,52 @@ class PriorityEngine:
             priority = EventPriority.CRITICAL
 
         return priority, total_score, reasons
+
+    def compute_priority_breakdown(
+        self,
+        context_event: ContextEvent,
+        cross_camera_confirmed: bool = False,
+        anomaly_score: float = None
+    ) -> List[dict]:
+        """
+        Returns an itemized breakdown of scoring factors with points and active status.
+        """
+        factors = [
+            {
+                "name": "Restricted Zone Entry",
+                "points": 45.0,
+                "active": bool(context_event.in_restricted_zone),
+                "detail": f"Zone: {context_event.zone_name or 'Restricted Area'}" if context_event.in_restricted_zone else "Outside restricted boundary"
+            },
+            {
+                "name": "Night-Time Operation Context",
+                "points": 20.0,
+                "active": context_event.time_context == TimeContextEnum.NIGHT,
+                "detail": f"Context: {context_event.time_context.value}"
+            },
+            {
+                "name": "Sustained Loitering",
+                "points": 20.0,
+                "active": bool(context_event.loitering),
+                "detail": f"Duration: {context_event.loitering_duration_seconds:.0f}s (Threshold: {settings.LOITERING_THRESHOLD_SECONDS}s)" if context_event.loitering else "No prolonged loitering"
+            },
+            {
+                "name": "Movement Toward Boundary",
+                "points": 15.0,
+                "active": context_event.direction == DirectionEnum.TOWARD_BOUNDARY,
+                "detail": f"Vector: {context_event.direction.value}"
+            },
+            {
+                "name": "Cross-Camera Corroboration",
+                "points": 15.0,
+                "active": bool(cross_camera_confirmed),
+                "detail": "Corroborated across adjacent camera" if cross_camera_confirmed else "Single-camera observation"
+            },
+            {
+                "name": "Secondary Anomaly Signal",
+                "points": 10.0,
+                "active": bool(anomaly_score is not None and anomaly_score >= settings.ANOMALY_SCORE_THRESHOLD),
+                "detail": f"Anomaly score: {anomaly_score:.2f}" if anomaly_score is not None else "Normal kinematic motion"
+            }
+        ]
+        return factors

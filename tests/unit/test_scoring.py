@@ -59,3 +59,56 @@ def test_alert_manager_dedup_and_state():
     # State update
     updated = manager.update_state(alert1.alert_id, AlertState.ACKNOWLEDGED)
     assert updated.state == AlertState.ACKNOWLEDGED
+
+def test_priority_engine_factor_breakdown():
+    engine = PriorityEngine()
+    now = time.time()
+
+    ctx = ContextEvent(
+        camera_id="CAM-01", track_id=2, class_name="person", timestamp=now,
+        in_restricted_zone=True, zone_name="Restricted Alpha",
+        loitering=True, loitering_duration_seconds=25.0,
+        time_context=TimeContextEnum.NIGHT,
+        direction=DirectionEnum.TOWARD_BOUNDARY
+    )
+
+    factors = engine.compute_priority_breakdown(ctx, cross_camera_confirmed=False, anomaly_score=0.85)
+    assert len(factors) == 6
+    zone_f = next(f for f in factors if f["name"] == "Restricted Zone Entry")
+    assert zone_f["active"] is True
+    assert zone_f["points"] == 45.0
+
+    night_f = next(f for f in factors if f["name"] == "Night-Time Operation Context")
+    assert night_f["active"] is True
+    assert night_f["points"] == 20.0
+
+    anom_f = next(f for f in factors if f["name"] == "Secondary Anomaly Signal")
+    assert anom_f["active"] is True
+    assert anom_f["points"] == 10.0
+
+def test_explanation_generator():
+    now = time.time()
+    from backend.interfaces import AlertOutput
+    alert = AlertOutput(
+        alert_id="ALT-101",
+        camera_id="CAM-01",
+        track_id=1,
+        class_name="person",
+        timestamp=now,
+        event_priority=EventPriority.HIGH,
+        event_priority_score=80.0,
+        camera_reliability=CameraStatus.GOOD,
+        camera_reliability_score=94.0,
+        actionability=Actionability.HIGH,
+        action_recommendation="Dispatch perimeter patrol.",
+        why_reasons=["Restricted zone entry", "Night operation"]
+    )
+    expl = ExplanationGenerator.generate_explanation(alert)
+    assert "what" in expl
+    assert "PERSON" in expl["what"]
+    assert "where" in expl
+    assert "why_reasons" in expl
+    assert "how_reliable" in expl
+    assert "actionability" in expl
+    assert expl["actionability"] == "HIGH"
+

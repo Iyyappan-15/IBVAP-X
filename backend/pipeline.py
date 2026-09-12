@@ -36,6 +36,11 @@ class IBVAPXPipeline:
         self.ring_buffer = PreEventRingBuffer(max_seconds=10, fps=10.0)
 
         self.enable_demo_degradation = enable_demo_degradation
+        self.last_reliability = None
+        self.last_detections = []
+        self.last_tracks = []
+        self.last_context_events = []
+        self.last_alerts = []
 
     def process_frame(
         self,
@@ -61,14 +66,18 @@ class IBVAPXPipeline:
             timestamp=frame_obj.timestamp,
             image_np=image_np
         )
+        self.last_reliability = rel_score
 
         # 2. Object Detection (with Sub-Box Containment Suppression)
         detections = self.detector.detect(frame_obj, image_np=image_np)
+        self.last_detections = detections
 
         # 3. Multi-Object Tracking (ByteTrack / IoU Fallback)
         tracks = self.tracker.update(detections, timestamp=frame_obj.timestamp)
+        self.last_tracks = tracks
 
         new_alerts: List[AlertOutput] = []
+        ctx_events = []
 
         # Process each active track through parallel engines
         for track in tracks:
@@ -80,6 +89,7 @@ class IBVAPXPipeline:
                 frame_height=image_np.shape[0],
                 timestamp=frame_obj.timestamp
             )
+            ctx_events.append(ctx_event)
 
             # 5. PARALLEL STREAM C: Anomaly Engine (Optional, non-blocking)
             anomaly_res = self.anomaly_detector.evaluate_track(
@@ -110,6 +120,9 @@ class IBVAPXPipeline:
                         current_frame_img=image_np
                     )
                 new_alerts.append(alert)
+
+        self.last_context_events = ctx_events
+        self.last_alerts = new_alerts
 
         # Draw visual tracking overlay
         annotated = ObjectTracker.draw_tracks_overlay(image_np, tracks)

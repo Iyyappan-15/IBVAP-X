@@ -7,7 +7,8 @@ if ROOT_DIR not in sys.path:
 
 import streamlit as st
 import time
-
+from datetime import datetime
+from backend.evidence.audit import AuditLogger
 
 st.set_page_config(page_title="Alerts — IBVAP-X", page_icon="🚨", layout="wide")
 
@@ -16,8 +17,27 @@ st.caption("Reliability-Aware Alert Queue & Decision Explainability Panel")
 
 st.markdown("---")
 
-# Demo mock alerts list for visual demonstration
-demo_alerts = [
+# Retrieve live alerts from session state or use default demonstration alerts
+session_alerts = []
+if st.session_state.get("ibvapx_summary") and st.session_state["ibvapx_summary"].get("alerts_list"):
+    for a in st.session_state["ibvapx_summary"]["alerts_list"]:
+        session_alerts.append({
+            "alert_id": a["alert_id"],
+            "camera_id": st.session_state["ibvapx_summary"]["camera_id"],
+            "track_id": a.get("track_id", 1),
+            "class_name": a.get("class_name", "target"),
+            "time_str": datetime.fromtimestamp(a["timestamp"]).strftime("%H:%M:%S"),
+            "event_priority": a["priority"],
+            "event_priority_score": a["priority_score"],
+            "camera_reliability": a["camera_reliability"],
+            "camera_reliability_score": a.get("camera_reliability_score", 95.0),
+            "actionability": a["actionability"],
+            "action_recommendation": a["action_recommendation"],
+            "why_reasons": a["why_reasons"],
+            "state": st.session_state.get("operator_actions", {}).get(a["alert_id"], {}).get("status", "ACTIVE")
+        })
+
+demo_alerts = session_alerts or [
     {
         "alert_id": "ALT-8F92A1",
         "camera_id": "CAM-03",
@@ -82,9 +102,7 @@ for alert in demo_alerts:
         f"— Camera {alert['camera_id']} | {alert['class_name'].upper()} | {alert['time_str']} | {state_badge}"
     )
 
-    # ── Fix Task 2: st.expander (singular) — not st.expansions ──────────
     with st.expander(header, expanded=(alert["state"] == "ACTIVE")):
-
         col1, col2, col3 = st.columns(3)
 
         with col1:
@@ -122,7 +140,7 @@ for alert in demo_alerts:
                 f":{a_color}[**{alert['actionability']}**]"
             )
 
-        st.markdown("#### 📋 Explainability Breakdown — Why Suspicious?")
+        st.markdown("#### 📋 Explainability Breakdown — Why Alerted?")
         for reason in alert["why_reasons"]:
             st.markdown(f"- ✓ {reason}")
 
@@ -145,18 +163,21 @@ for alert in demo_alerts:
         c_ack, c_rej, c_unc, c_timer = st.columns([1, 1, 1, 2])
         with c_ack:
             if st.button("✅ CONFIRM", key=f"ack_{alert['alert_id']}"):
+                AuditLogger().log_event("OPERATOR_ACTION", "OPERATOR-01", alert["alert_id"], "Confirmed alert.")
                 st.success("Alert ACKNOWLEDGED by operator.")
         with c_rej:
             if st.button("❌ REJECT", key=f"rej_{alert['alert_id']}"):
+                AuditLogger().log_event("OPERATOR_ACTION", "OPERATOR-01", alert["alert_id"], "Rejected alert (false positive).")
                 st.info("Alert REJECTED — logged as false positive.")
         with c_unc:
             if st.button("❓ UNCERTAIN", key=f"unc_{alert['alert_id']}"):
+                AuditLogger().log_event("OPERATOR_ACTION", "OPERATOR-01", alert["alert_id"], "Marked alert uncertain.")
                 st.warning("Alert marked UNCERTAIN — flagged for supervisor review.")
         with c_timer:
-            st.markdown("⏱️ Escalation Timer: **00:22** (Timeout: 30s)")
+            st.markdown("⏱️ Escalation Policy: **Auto-escalates in 30s if unacknowledged**")
 
 st.markdown("---")
 st.caption(
-    "ℹ️ Alerts shown above are demonstration records. "
-    "Run the Live Monitoring pipeline to generate real-time alerts from uploaded video."
+    "ℹ️ Alerts are populated dynamically from the Live Monitoring session or available as demonstration records."
 )
+
