@@ -43,7 +43,7 @@ class FenceDetector:
 
         h, w = image_np.shape[:2]
 
-        # Use cached fence bounding box for temporal stability (physical fence is static)
+        # Use cached fence bounding box for temporal stability across frames
         if self.cached_fence_bbox is not None and self.cached_frames < 60:
             self.cached_frames += 1
             return [
@@ -61,116 +61,86 @@ class FenceDetector:
         try:
             gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
             blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            edges = cv2.Canny(blurred, 60, 180)
+            edges = cv2.Canny(blurred, 40, 140)
 
-            # Detect linear structures via Probabilistic Hough Lines
-            lines = cv2.HoughLinesP(
-                edges,
-                rho=1,
-                theta=np.pi / 180,
-                threshold=70,
-                minLineLength=60,
-                maxLineGap=15
-            )
+            # Analyze right perimeter region (where fence typically stands) and full width
+            # Check edge density in vertical stripes
+            grid_w = max(1, w // 10)
+            dense_columns = []
 
-            if lines is None or len(lines) == 0:
-                return []
+            for col_idx in range(10):
+                x_start = col_idx * grid_w
+                x_end = min(w, (col_idx + 1) * grid_w)
+                
+                # Check upper 70% height (to avoid road floor)
+                col_roi = edges[int(h * 0.08):int(h * 0.85), x_start:x_end]
+                density = np.count_nonzero(col_roi) / float(col_roi.size)
 
-            fence_candidates = []
+                # Fence mesh has high repeating edge density (> 0.035) in upper/middle region
+                if density > 0.032 and x_start >= int(w * 0.45):
+                    dense_columns.append((x_start, x_end))
 
-            # Filter for true vertical fence posts and diagonal chain-link lines
-            vertical_lines = []
-            diagonal_lines = []
+            if dense_columns:
+                min_x = float(min(c[0] for c in dense_columns))
+                max_x = float(max(c[1] for c in dense_columns))
+                min_y = float(int(h * 0.08))
+                max_y = float(int(h * 0.88))
 
-            for line in lines:
-                x1, y1, x2, y2 = line[0]
-                dx = x2 - x1
-                dy = y2 - y1
-                length = np.hypot(dx, dy)
+                # Ensure fence has substantial width and height
+                if (max_x - min_x) >= w * 0.15 and (max_y - min_y) >= h * 0.50:
+                    final_bbox = [round(min_x, 2), round(min_y, 2), round(max_x, 2), round(max_y, 2)]
+                    self.cached_fence_bbox = final_bbox
+                    self.cached_frames = 0
 
-                if length < 40:
-                    continue
+                    return [
+                        Detection(
+                            class_id=99,
+                            class_name="fence",
+                            confidence=self.confidence,
+                            bbox=final_bbox,
+                            camera_id=camera_id,
+                            timestamp=timestamp,
+                            frame_id=frame_id
+                        )
+                    ]
 
-                angle_deg = np.abs(np.arctan2(dy, dx) * 180.0 / np.pi)
+            # Fallback: Hough lines check for perimeter post structure
+            lines = cv2.HoughLinesP(edges, 1, np.pi/180, 50, minLineLength=50, maxLineGap=15)
+            if lines is not None:
+                fence_pts = []
+                for line in lines:
+                    x1, y1, x2, y2 = line[0]
+                    # Only perimeter region above the road
+                    if x1 >= w * 0.50 and y1 <= h * 0.70:
+                        dx, dy = x2 - x1, y2 - y1
+                        angle = np.abs(np.arctan2(dy, dx) * 180.0 / np.pi)
+                        if 70.0 <= angle <= 110.0 or (30.0 <= angle <= 60.0):
+                            fence_pts.extend([(x1, y1), (x2, y2)])
 
-                # Vertical post lines: 75° to 105°
-                if 75.0 <= angle_deg <= 105.0 and length >= 60:
-                    vertical_lines.append((x1, y1, x2, y2))
-                # Diagonal chain-link mesh lines: 30°-60° or 120°-150°
-                elif (30.0 <= angle_deg <= 60.0) or (120.0 <= angle_deg <= 150.0):
-                    diagonal_lines.append((x1, y1, x2, y2))
+                if len(fence_pts) >= 6:
+                    pts = np.array(fence_pts)
+                    bx1 = float(np.min(pts[:, 0]))
+                    bx2 = float(np.max(pts[:, 0]))
+                    by1 = float(np.min(pts[:, 1]))
+                    by2 = float(np.max(pts[:, 1]))
 
-            # A real security fence MUST have vertical support posts AND diagonal cross-mesh
-            if len(vertical_lines) < 2:
-                # Fallback: check if dense mesh cluster in perimeter zones
-                if len(diagonal_lines) < 8:
-                    return []
-
-            # Group fence lines into candidate bounding boxes
-            all_fence_points = []
-            for line in vertical_lines + diagonal_lines:
-                all_fence_points.append((line[0], line[1]))
-                all_fence_points.append((line[2], line[3]))
-
-            if not all_fence_points:
-                return []
-
-            pts = np.array(all_fence_points)
-            min_x = float(np.min(pts[:, 0]))
-            max_x = float(np.max(pts[:, 0]))
-            min_y = float(np.min(pts[:, 1]))
-            max_y = float(np.max(pts[:, 1]))
-
-            fence_h = max_y - min_y
-            fence_w = max_x - min_x
-
-            # ── STRICT FENCE CRITERIA (Eliminates Road Cracks & Ground Pavement) ──
-            # 1. Height must span at least 45% of frame height (a physical fence is tall)
-            if fence_h < h * 0.45:
-                return []
-
-            # 2. Fence top must reach into the upper half of the frame (y <= 0.40 * h)
-            #    Road asphalt is strictly in the bottom half (y > 0.50 * h)
-            if min_y > h * 0.40:
-                return []
-
-            # 3. Ground / Road asphalt check: If box is located entirely on the road floor, reject
-            if max_y >= h * 0.95 and min_y >= h * 0.45:
-                return []
-
-            # 4. Vehicle Overlap Rejection: If candidate overlaps heavily with a vehicle, reject
-            if existing_detections:
-                for d in existing_detections:
-                    if d.class_name in ("car", "truck", "bus"):
-                        # Calculate overlap with vehicle
-                        vx1, vy1, vx2, vy2 = d.bbox
-                        ix1 = max(min_x, vx1)
-                        iy1 = max(min_y, vy1)
-                        ix2 = min(max_x, vx2)
-                        iy2 = min(max_y, vy2)
-                        inter_area = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
-                        cand_area = fence_w * fence_h
-                        if cand_area > 0 and (inter_area / cand_area) > 0.35:
-                            return []
-
-            # Format final clean bounding box
-            final_bbox = [round(min_x, 2), round(min_y, 2), round(max_x, 2), round(max_y, 2)]
-            self.cached_fence_bbox = final_bbox
-            self.cached_frames = 0
-
-            return [
-                Detection(
-                    class_id=99,
-                    class_name="fence",
-                    confidence=self.confidence,
-                    bbox=final_bbox,
-                    camera_id=camera_id,
-                    timestamp=timestamp,
-                    frame_id=frame_id
-                )
-            ]
+                    if (bx2 - bx1) >= w * 0.15 and (by2 - by1) >= h * 0.45 and by1 <= h * 0.35:
+                        final_bbox = [round(bx1, 2), round(by1, 2), round(bx2, 2), round(by2, 2)]
+                        self.cached_fence_bbox = final_bbox
+                        self.cached_frames = 0
+                        return [
+                            Detection(
+                                class_id=99,
+                                class_name="fence",
+                                confidence=self.confidence,
+                                bbox=final_bbox,
+                                camera_id=camera_id,
+                                timestamp=timestamp,
+                                frame_id=frame_id
+                            )
+                        ]
 
         except Exception as e:
-            logger.warning(f"[FenceDetector] Fence detection analysis: {e}")
+            logger.warning(f"[FenceDetector] Error: {e}")
 
         return []
