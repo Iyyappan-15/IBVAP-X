@@ -11,10 +11,6 @@ from backend.detection.fence_detector import FenceDetector
 
 logger = logging.getLogger(__name__)
 
-class ModelNotFoundError(Exception):
-    """Raised when YOLO weights file is missing."""
-    pass
-
 
 def suppress_nested_subboxes(detections: List[Detection], containment_threshold: float = 0.60) -> List[Detection]:
     """
@@ -88,18 +84,26 @@ class ObjectDetector:
         self.target_classes = target_classes or settings.detect_classes_list
         self.fence_detector = FenceDetector()
 
-        if not os.path.exists(self.model_path):
-            raise ModelNotFoundError(
-                f"YOLO model weights file not found at '{self.model_path}'. "
-                f"Run 'python scripts/download_model.py' to download weights."
-            )
-
         # Detect GPU vs CPU
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        logger.info(f"[Detector] Initializing YOLO model '{self.model_path}' on device: {self.device}")
+        logger.info(f"[Detector] Initializing YOLO model on device: {self.device}")
 
         from ultralytics import YOLO
-        self.model = YOLO(self.model_path)
+
+        # Auto-download model if missing (essential for 1-click Streamlit Cloud deployment)
+        if not os.path.exists(self.model_path):
+            os.makedirs(os.path.dirname(os.path.abspath(self.model_path)), exist_ok=True)
+            logger.info(f"[Detector] Weights not found at '{self.model_path}'. Auto-downloading YOLOv8n weights...")
+            self.model = YOLO("yolov8n.pt")
+            try:
+                import shutil
+                if os.path.exists("yolov8n.pt") and self.model_path != "yolov8n.pt":
+                    shutil.copy("yolov8n.pt", self.model_path)
+            except Exception:
+                pass
+        else:
+            self.model = YOLO(self.model_path)
+
         self.model.to(self.device)
 
         # Map class names to class IDs for configured target classes
