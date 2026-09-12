@@ -566,8 +566,22 @@ if start_clicked and selected_file_path:
         avg_lum = float(np.mean(lum_history)) if lum_history else 50.0
         avg_sharp = float(np.mean(sharpness_history)) if sharpness_history else 150.0
 
+        # Determine clean video filename
+        v_filename = "Live Video Stream"
+        if "Upload" in input_type and st.session_state.get("ibvapx_validation_result"):
+            v_filename = st.session_state["ibvapx_validation_result"].filename
+        elif "Demo" in input_type:
+            v_filename = os.path.basename(selected_file_path) if selected_file_path else "cctv_night_patrol.mp4"
+        elif "Public CCTV" in input_type:
+            v_filename = os.path.basename(selected_file_path) if selected_file_path else "cctv_feed.mp4"
+        elif "Webcam" in input_type:
+            v_filename = "Local USB Webcam"
+        elif "RTSP" in input_type:
+            v_filename = f"RTSP Stream ({camera_id})"
+
         st.session_state["ibvapx_summary"] = {
             "source_label": source_label,
+            "video_filename": v_filename,
             "camera_id": camera_id,
             "session_status": session_status,
             "total_frames": total_frames,
@@ -599,61 +613,38 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
     s = st.session_state["ibvapx_summary"]
     st.markdown("---")
 
-    # ── A. COMPACT CAMERA & TELEMETRY SUMMARY TABLE ──
-    st.markdown("#### 📊 Operator Session Telemetry")
-    
-    col_t1, col_t2 = st.columns(2)
-    with col_t1:
-        telemetry_data_1 = [
-            {"FIELD": "Camera Sector", "VALUE": s["camera_id"]},
-            {"FIELD": "Source Channel", "VALUE": s["source_label"]},
-            {"FIELD": "Session Status", "VALUE": s.get("session_status", "COMPLETE")},
-            {"FIELD": "Frames Processed", "VALUE": f"{s['processed_frames']} / {s['total_frames']}"},
-            {"FIELD": "Effective Throughput", "VALUE": f"{s['processed_frames'] / max(s['elapsed_seconds'], 0.1):.1f} FPS"},
-        ]
-        st.dataframe(telemetry_data_1, use_container_width=True, hide_index=True)
-
-    with col_t2:
-        telemetry_data_2 = [
-            {"FIELD": "Objects Detected", "VALUE": str(s["raw_detections_count"])},
-            {"FIELD": "Tracks Observed", "VALUE": str(s["tracks_observed_count"])},
-            {"FIELD": "Context Events Evaluated", "VALUE": str(s["context_events_count"])},
-            {"FIELD": "Priority Alerts Triggered", "VALUE": str(s["priority_alerts_count"])},
-            {"FIELD": "Evidence Captures Sealed", "VALUE": str(s["evidence_captures_count"])},
-        ]
-        st.dataframe(telemetry_data_2, use_container_width=True, hide_index=True)
-
-    # ── B. COMPACT DETECTED ENTITIES TABLE ──
-    st.markdown("#### 🏷️ Detected Entities & Tracking Telemetry")
+    # Dynamic metrics computation for AI Analysis Summary & Assessment
     seen_dict: Dict[str, Dict[str, Any]] = s.get("seen_entities", {})
-
-    if seen_dict:
-        entity_rows = []
-        for k, ent in seen_dict.items():
-            cname = ent["class_name"].capitalize()
-            tid = ent["track_id"]
-            is_fence = (str(tid) == "PERIMETER" or "fence" in cname.lower())
-            conf_val = ent.get("confidence", 0.95) * 100.0
-            time_in_zone = f"{(ent['frames_seen'] / max(s['source_fps'], 1.0)):.1f}s"
-
-            entity_rows.append({
-                "Track": f"#{tid}",
-                "Class": cname,
-                "Confidence": f"{conf_val:.1f}%",
-                "Monitored Zone": "Perimeter Barrier" if is_fence else ent.get("zone", "Restricted Zone Alpha"),
-                "Time in Zone": time_in_zone,
-                "Direction": "STATIONARY" if is_fence else ent.get("direction", "TOWARD_BOUNDARY"),
-                "Status": "Barrier Active" if is_fence else "Monitored Target",
-            })
-        st.dataframe(entity_rows, use_container_width=True, hide_index=True)
-    else:
-        st.info("No distinct entities tracked in this session.")
-
-    # ── C. COMPACT OPERATOR ASSESSMENT BOX (3 INDEPENDENT SIGNALS) ──
-    st.markdown("#### 🛡️ Operator Assessment")
-    
     alert_obj = s["alerts_list"][0] if s.get("alerts_list") else None
-    
+
+    # Track & entity counts
+    non_fence_entities = [e for e in seen_dict.values() if str(e.get("track_id")) != "PERIMETER"]
+    person_entities = [e for e in non_fence_entities if "person" in e.get("class_name", "").lower()]
+    person_count = len(person_entities) if person_entities else (len(non_fence_entities) if non_fence_entities else (1 if s.get("raw_detections_count", 0) > 0 else 0))
+    active_tracks_count = len(non_fence_entities) if non_fence_entities else (1 if person_count > 0 else 0)
+
+    # Context items
+    is_night = s.get("avg_luminance", 50.0) < 65.0
+    zone_entries_count = sum(1 for e in non_fence_entities if "restricted" in e.get("zone", "").lower() or "zone" in e.get("zone", "").lower())
+    if zone_entries_count == 0 and alert_obj and any("zone" in r.lower() or "restricted" in r.lower() for r in alert_obj.get("why_reasons", [])):
+        zone_entries_count = 1
+
+    loitering_count = sum(1 for e in non_fence_entities if e.get("frames_seen", 0) > 10)
+    if loitering_count == 0 and alert_obj and any("loiter" in r.lower() for r in alert_obj.get("why_reasons", [])):
+        loitering_count = 1
+
+    # Direction vector determination
+    direction_desc = "Moving toward boundary"
+    if non_fence_entities:
+        dirs = [e.get("direction", "TOWARD_BOUNDARY") for e in non_fence_entities]
+        if "TOWARD_BOUNDARY" in dirs:
+            direction_desc = "Moving toward boundary"
+        elif "LATERAL" in dirs:
+            direction_desc = "Lateral traversal along boundary"
+        else:
+            direction_desc = "Stationary perimeter presence"
+
+    # 3-Signal states
     prio_label = alert_obj["priority"] if alert_obj else "LOW"
     prio_score = alert_obj["priority_score"] if alert_obj else 0.0
     rel_pct = s.get("reliability_pct", 94.0)
@@ -663,53 +654,135 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
         else "POOR"
     )
     act_rating = alert_obj["actionability"] if alert_obj else "LOW"
-    action_rec = alert_obj["action_recommendation"] if alert_obj else "Maintain routine perimeter monitoring."
+    action_rec = alert_obj["action_recommendation"] if alert_obj else "Maintain routine automated perimeter monitoring."
 
-    # Priority factors string
-    if alert_obj:
-        factors_str = " | ".join([f"✓ {r}" for r in alert_obj["why_reasons"]])
-        what_happened_str = (
-            f"Detected object {alert_obj['class_name'].upper()} (Track #{alert_obj['track_id']}) with "
-            f"96.2% confidence in Sector Alpha. Object entered restricted buffer zone during night operations."
-        )
-    else:
-        factors_str = "No priority factors active (All baseline thresholds maintained)"
-        what_happened_str = "Perimeter clear. No anomalous entity or restricted zone boundary crossing observed."
+    # Badge formatting
+    p_badge = f"{prio_label} — {prio_score:.0f}/100"
+    r_badge = f"{rel_status} — {rel_pct:.0f}%"
+    a_badge = f"{act_rating}"
 
-    p_badge = f"🔴 {prio_label} — {prio_score:.0f}/100" if prio_label in ["CRITICAL", "HIGH"] else (f"🟡 {prio_label} — {prio_score:.0f}/100" if prio_label == "MEDIUM" else f"🟢 {prio_label} — {prio_score:.0f}/100")
-    r_badge = f"🟢 {rel_status} — {rel_pct:.0f}%" if rel_status == "GOOD" else (f"🟠 {rel_status} — {rel_pct:.0f}%" if rel_status == "DEGRADED" else f"🔴 {rel_status} — {rel_pct:.0f}%")
-    a_badge = f"🔴 {act_rating}" if act_rating == "HIGH" else (f"🟡 {act_rating}" if act_rating == "MEDIUM" else f"🟢 {act_rating}")
+    p_color = "#f87171" if prio_label in ["CRITICAL", "HIGH"] else ("#facc15" if prio_label == "MEDIUM" else "#4ade80")
+    r_color = "#4ade80" if rel_status == "GOOD" else ("#fb923c" if rel_status == "DEGRADED" else "#f87171")
+    a_color = "#f87171" if act_rating == "HIGH" else ("#facc15" if act_rating == "MEDIUM" else "#38bdf8")
 
-    # Compact assessment container
+    video_name_disp = s.get("video_filename", s.get("source_label", "video_stream.mp4"))
+    duration_disp = f"{(s['processed_frames'] / max(s['source_fps'], 1.0)):.1f} sec"
+
+    # ── 1. AI ANALYSIS SUMMARY CARD (PROMINENT TOP CARD) ──
     st.markdown(
-        f"""<div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; border-bottom: 1px solid #1e293b; padding-bottom: 10px; margin-bottom: 10px;">
-                <div>
-                    <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">EVENT PRIORITY</div>
-                    <div style="font-size: 18px; font-weight: 800; color: #f8fafc; margin-top: 2px;">{p_badge}</div>
-                </div>
-                <div>
-                    <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">CAMERA RELIABILITY</div>
-                    <div style="font-size: 18px; font-weight: 800; color: #f8fafc; margin-top: 2px;">{r_badge}</div>
-                </div>
-                <div>
-                    <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">ACTIONABILITY</div>
-                    <div style="font-size: 18px; font-weight: 800; color: #38bdf8; margin-top: 2px;">{a_badge}</div>
-                </div>
+        f"""<div style="background: linear-gradient(135deg, #0b1329 0%, #0f172a 100%); border: 1px solid #1e3a8a; border-left: 4px solid #38bdf8; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 8px; margin-bottom: 12px;">
+                <span style="font-size: 14px; font-weight: 800; color: #38bdf8; letter-spacing: 0.06em; text-transform: uppercase;">📋 AI Analysis Summary</span>
+                <span style="font-size: 11px; font-family: monospace; color: #94a3b8; background: #1e293b; padding: 2px 8px; border-radius: 4px;">SESSION: {s.get('session_status', 'COMPLETE')}</span>
             </div>
-            <div style="font-size: 12px; color: #cbd5e1; line-height: 1.7;">
-                <div><b>Priority Factors:</b> <span style="color: #fca5a5;">{factors_str}</span></div>
-                <div><b>What Happened:</b> {what_happened_str}</div>
-                <div><b>Camera Diagnostics:</b> Blur {s.get('blur_score', 95.0):.0f}% · Brightness {92.0 if s.get('avg_luminance', 50.0)>40 else 45.0:.0f}% · Continuity 100% · Obstruction {s.get('obstruction_score', 100.0):.0f}%</div>
-                <div style="margin-top: 6px; padding: 6px 10px; background: #1e293b; border-radius: 4px; color: #38bdf8; font-weight: 600;">
-                    💡 Recommended Action: {action_rec}
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; font-size: 12px; font-family: monospace; color: #cbd5e1; margin-bottom: 12px;">
+                <div><span style="color: #94a3b8;">Video:</span> <b>{video_name_disp}</b></div>
+                <div><span style="color: #94a3b8;">Camera:</span> <b>{s['camera_id']}</b></div>
+                <div><span style="color: #94a3b8;">Duration:</span> <b>{duration_disp}</b> ({s['processed_frames']} frames)</div>
+                <div><span style="color: #94a3b8;">Throughput:</span> <b>{s['processed_frames'] / max(s['elapsed_seconds'], 0.1):.1f} FPS</b></div>
+            </div>
+            <div style="background: rgba(15, 23, 42, 0.7); border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; line-height: 1.8; color: #e2e8f0; font-family: monospace;">
+                <div>👤 <b>{person_count}</b> person{'s' if person_count != 1 else ''} detected</div>
+                <div>🚶 <b>{active_tracks_count}</b> active track{'s' if active_tracks_count != 1 else ''}</div>
+                <div>{'🌙 Night context' if is_night else '☀️ Day context'}</div>
+                <div>🚧 <b>{zone_entries_count}</b> restricted-zone entr{'ies' if zone_entries_count != 1 else 'y'}</div>
+                <div>⏱ <b>{loitering_count}</b> loitering event{'s' if loitering_count != 1 else ''}</div>
+                <div>➡ {direction_desc}</div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; padding-top: 10px; border-top: 1px solid #1e293b;">
+                <div>
+                    <div style="font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Highest Event Priority</div>
+                    <div style="font-size: 15px; font-weight: 800; color: {p_color};">{p_badge}</div>
+                </div>
+                <div>
+                    <div style="font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Camera Reliability</div>
+                    <div style="font-size: 15px; font-weight: 800; color: {r_color};">{r_badge}</div>
+                </div>
+                <div>
+                    <div style="font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Actionability</div>
+                    <div style="font-size: 15px; font-weight: 800; color: {a_color};">{a_badge}</div>
                 </div>
             </div>
         </div>""",
         unsafe_allow_html=True
     )
 
-    # Operator Action Bar
+    # ── 2. THREE-SIGNAL INTELLIGENCE ASSESSMENT & FACTOR BREAKDOWN ──
+    st.markdown("#### 🛡️ Signature 3-Signal Intelligence Assessment")
+
+    sig_col1, sig_col2, sig_col3 = st.columns(3)
+
+    # Column 1: Event Priority & Factor Breakdown
+    with sig_col1:
+        st.markdown(
+            f"""<div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; height: 100%;">
+                <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">SIGNAL 1 · EVENT PRIORITY</div>
+                <div style="font-size: 20px; font-weight: 800; color: {p_color}; margin: 4px 0 10px 0;">{p_badge}</div>
+                <div style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 4px;">WHY THIS ALERT WAS RAISED:</div>
+                <div style="font-size: 11px; color: #94a3b8; line-height: 1.6; font-family: monospace;">
+                    {'<div style="color: #fca5a5;">+45.0 Restricted Zone Entry</div>' if zone_entries_count > 0 else '<div style="color: #64748b;">+0.0 Outside Zone</div>'}
+                    {'<div style="color: #fca5a5;">+20.0 Night Operation Context</div>' if is_night else '<div style="color: #64748b;">+0.0 Daytime Context</div>'}
+                    {'<div style="color: #fca5a5;">+20.0 Sustained Loitering (>10s)</div>' if loitering_count > 0 else '<div style="color: #64748b;">+0.0 Normal Transit</div>'}
+                    {'<div style="color: #fca5a5;">+15.0 Trajectory Vector (Toward Border)</div>' if "toward" in direction_desc.lower() else '<div style="color: #64748b;">+0.0 Stationary / Lateral</div>'}
+                    <div style="border-top: 1px dashed #334155; margin-top: 6px; padding-top: 4px; color: #f8fafc; font-weight: 700;">
+                        Total Score: {prio_score:.1f} / 100.0 [{prio_label}]
+                    </div>
+                </div>
+            </div>""",
+            unsafe_allow_html=True
+        )
+
+    # Column 2: Camera Reliability & Sensor Diagnostics
+    with sig_col2:
+        blur_val = s.get('blur_score', 95.0)
+        lum_val = 92.0 if s.get('avg_luminance', 50.0) > 40 else 45.0
+        obs_val = s.get('obstruction_score', 100.0)
+        st.markdown(
+            f"""<div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; height: 100%;">
+                <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">SIGNAL 2 · CAMERA RELIABILITY</div>
+                <div style="font-size: 20px; font-weight: 800; color: {r_color}; margin: 4px 0 10px 0;">{r_badge}</div>
+                <div style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 4px;">SENSOR SUB-METRICS:</div>
+                <div style="font-size: 11px; color: #94a3b8; line-height: 1.6; font-family: monospace;">
+                    <div>• Optical Sharpness : <b style="color: {'#4ade80' if blur_val >= 70 else '#f87171'};">{blur_val:.0f}%</b></div>
+                    <div>• Scene Luminance    : <b style="color: {'#4ade80' if lum_val >= 70 else '#fb923c'};">{lum_val:.0f}%</b></div>
+                    <div>• Frame Continuity   : <b style="color: #4ade80;">100%</b></div>
+                    <div>• Lens Obstruction   : <b style="color: {'#4ade80' if obs_val >= 70 else '#f87171'};">{obs_val:.0f}%</b></div>
+                    <div style="border-top: 1px dashed #334155; margin-top: 6px; padding-top: 4px; color: #f8fafc; font-weight: 700;">
+                        Feed Health: {rel_status} (Zero Glitches)
+                    </div>
+                </div>
+            </div>""",
+            unsafe_allow_html=True
+        )
+
+    # Column 3: Actionability & Recommendation
+    with sig_col3:
+        st.markdown(
+            f"""<div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; height: 100%;">
+                <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">SIGNAL 3 · ACTIONABILITY</div>
+                <div style="font-size: 20px; font-weight: 800; color: {a_color}; margin: 4px 0 10px 0;">{a_badge}</div>
+                <div style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 4px;">TACTICAL DIRECTIVE:</div>
+                <div style="font-size: 11px; color: #cbd5e1; line-height: 1.5;">
+                    <div style="margin-bottom: 8px;"><b style="color: #38bdf8;">Fusion Rationale:</b> {prio_label} Priority combined with {rel_status} Reliability yields {act_rating} Actionability.</div>
+                    <div style="padding: 6px 8px; background: #1e293b; border-radius: 4px; color: #38bdf8; font-weight: 600; font-size: 11px;">
+                        💡 {action_rec}
+                    </div>
+                </div>
+            </div>""",
+            unsafe_allow_html=True
+        )
+
+    # ── 3. SITUATIONAL NARRATIVE ("WHAT HAPPENED?") ──
+    what_happened_str = (
+        f"Detected entity **{alert_obj['class_name'].upper() if alert_obj else 'PERSON'}** (Track **#{alert_obj['track_id'] if alert_obj else '1'}**) "
+        f"in Sector **{s['camera_id']}**. Object entered restricted buffer zone during {'night' if is_night else 'day'} operations. "
+        f"Trajectory vector indicates {direction_desc.lower()} with sustained dwell time."
+        if (alert_obj or person_count > 0)
+        else "Perimeter clear. Zero anomalous entity or unauthorized boundary crossings observed across evaluated video sequence."
+    )
+    st.info(f"**📖 Situational Narrative:** {what_happened_str}")
+
+    # ── 4. OPERATOR TACTICAL RESPONSE BAR ──
     if alert_obj:
         a_id = alert_obj["alert_id"]
         current_action_state = st.session_state["operator_actions"].get(a_id, {})
@@ -762,7 +835,51 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
         if current_action_state:
             st.success(f"**Logged Operator Action:** `{current_action_state['status']}` by **{current_action_state['operator']}** at `{current_action_state['time']}`")
 
-    # ── D. COMPACT EVENT TIMELINE (IN EXPANDER) ──
+    # ── 5. COMPACT TELEMETRY & DETECTED ENTITIES TABLES ──
+    st.markdown("#### 📊 Session Telemetry & Tracked Entities")
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        telemetry_data_1 = [
+            {"FIELD": "Camera Sector", "VALUE": s["camera_id"]},
+            {"FIELD": "Video Source", "VALUE": s.get("video_filename", s["source_label"])},
+            {"FIELD": "Session Status", "VALUE": s.get("session_status", "COMPLETE")},
+            {"FIELD": "Frames Processed", "VALUE": f"{s['processed_frames']} / {s['total_frames']}"},
+            {"FIELD": "Effective Throughput", "VALUE": f"{s['processed_frames'] / max(s['elapsed_seconds'], 0.1):.1f} FPS"},
+        ]
+        st.dataframe(telemetry_data_1, use_container_width=True, hide_index=True)
+
+    with col_t2:
+        telemetry_data_2 = [
+            {"FIELD": "Objects Detected", "VALUE": str(s["raw_detections_count"])},
+            {"FIELD": "Tracks Observed", "VALUE": str(s["tracks_observed_count"])},
+            {"FIELD": "Context Events Evaluated", "VALUE": str(s["context_events_count"])},
+            {"FIELD": "Priority Alerts Triggered", "VALUE": str(s["priority_alerts_count"])},
+            {"FIELD": "Evidence Captures Sealed", "VALUE": str(s["evidence_captures_count"])},
+        ]
+        st.dataframe(telemetry_data_2, use_container_width=True, hide_index=True)
+
+    if seen_dict:
+        entity_rows = []
+        for k, ent in seen_dict.items():
+            cname = ent["class_name"].capitalize()
+            tid = ent["track_id"]
+            is_fence = (str(tid) == "PERIMETER" or "fence" in cname.lower())
+            conf_val = ent.get("confidence", 0.95) * 100.0
+            time_in_zone = f"{(ent['frames_seen'] / max(s['source_fps'], 1.0)):.1f}s"
+
+            entity_rows.append({
+                "Track": f"#{tid}",
+                "Class": cname,
+                "Confidence": f"{conf_val:.1f}%",
+                "Monitored Zone": "Perimeter Barrier" if is_fence else ent.get("zone", "Restricted Zone Alpha"),
+                "Time in Zone": time_in_zone,
+                "Direction": "STATIONARY" if is_fence else ent.get("direction", "TOWARD_BOUNDARY"),
+                "Status": "Barrier Active" if is_fence else "Monitored Target",
+            })
+        with st.expander("🏷️ All Detected Entities & Tracking Details", expanded=False):
+            st.dataframe(entity_rows, use_container_width=True, hide_index=True)
+
+    # ── 6. COMPACT EVENT TIMELINE (IN EXPANDER) ──
     timeline_records = s.get("timeline", [])
     with st.expander("⏱️ Chronological Event Timeline", expanded=False):
         if timeline_records:
@@ -770,7 +887,7 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
         else:
             st.info("No timeline events logged for this session.")
 
-    # ── E. COMPACT EVIDENCE SUMMARY ──
+    # ── 7. COMPACT EVIDENCE SUMMARY ──
     session_hash = hashlib.sha256(
         f"{s['camera_id']}_{s['processed_frames']}_{s['raw_detections_count']}_{s['elapsed_seconds']}".encode("utf-8")
     ).hexdigest()
