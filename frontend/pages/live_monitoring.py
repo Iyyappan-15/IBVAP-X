@@ -331,6 +331,13 @@ if start_clicked and selected_file_path:
 
     if init_error:
         st.error(f"Could not initialise the analysis pipeline. {init_error}")
+    elif not source or not source.is_connected:
+        if "Webcam" in input_type:
+            st.warning("📷 **Webcam Info:** Streamlit Cloud runs on a remote cloud server without a physical USB webcam attached. To test live video on cloud, please use **📤 Upload Video File** (or upload from mobile) or **🎬 Demo Video Stream**.")
+        elif "RTSP" in input_type:
+            st.warning(f"🌐 **RTSP Stream Notice:** The remote RTSP stream (`{selected_file_path}`) could not be reached. Cloud firewalls often restrict outbound RTSP ports. Please verify the URL or test with **🎬 Demo Video Stream**.")
+        else:
+            st.error(f"❌ Could not connect to video source: `{selected_file_path}`")
     else:
         st.markdown(f"#### 📡 Live Analysis Feed  —  `{source_label}`  ·  Camera: `{camera_id}`")
 
@@ -348,8 +355,8 @@ if start_clicked and selected_file_path:
         stat_hi_pri  = stats_cols[4].empty()
         stat_rel     = stats_cols[5].empty()
 
-        total_frames = source.total_frames
-        source_fps   = source.fps if source.fps > 0 else 25.0
+        total_frames = getattr(source, "total_frames", 500)
+        source_fps   = getattr(source, "fps", 25.0)
 
         # Frame step mode
         if "100%" in processing_mode:

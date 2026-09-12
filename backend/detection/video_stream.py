@@ -99,6 +99,8 @@ class WebcamVideoSource(VideoSource):
     def __init__(self, device_index: int = 0, camera_id: str = "CAM-WEBCAM"):
         super().__init__(camera_id=camera_id)
         self.device_index = device_index
+        self.fps = 25.0
+        self.total_frames = 500
         self.cap = cv2.VideoCapture(device_index)
 
         if not self.cap.isOpened():
@@ -108,6 +110,9 @@ class WebcamVideoSource(VideoSource):
             self.is_connected = True
             self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            raw_fps = self.cap.get(cv2.CAP_PROP_FPS)
+            if raw_fps and raw_fps > 0:
+                self.fps = raw_fps
 
     def get_frame(self) -> Optional[Frame]:
         if not self.is_connected:
