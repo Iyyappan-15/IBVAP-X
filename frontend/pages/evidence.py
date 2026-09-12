@@ -1,7 +1,14 @@
-import streamlit as st
+import sys
 import os
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+import streamlit as st
 from backend.evidence.hashing import EvidenceHasher
 from backend.evidence.audit import AuditLogger
+
 
 st.set_page_config(page_title="Evidence — IBVAP-X", page_icon="🔐", layout="wide")
 

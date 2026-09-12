@@ -1,13 +1,19 @@
+import sys
+import os
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 import streamlit as st
 import folium
-from streamlit_folium import folium_static
 
 st.set_page_config(page_title="Coverage Map — IBVAP-X", page_icon="🗺️", layout="wide")
 
 st.title("🗺️ Camera Coverage & Vulnerability Map")
 st.caption("Geometric FOV Wedge Modeling & Blind-Spot Identification")
 
-# MANDATORY DISCLAIMER BANNER (Refinement 4 & 5)
+# MANDATORY DISCLAIMER BANNER
 st.warning(
     "⚠️ **GEOMETRIC CAMERA-COVERAGE APPROXIMATION — Demo Simulation Data**\n\n"
     "This map displays simplified geometric FOV estimates calculated in a local Euclidean metric plane. "
@@ -62,5 +68,10 @@ folium.Polygon(
     popup="<b>IDENTIFIED COVERAGE GAP / BLIND SPOT</b><br>0 modeled camera FOVs in this zone"
 ).add_to(m)
 
-# Render Folium map in Streamlit
-folium_static(m, width=1100, height=550)
+# Robust Folium renderer (streamlit-folium with HTML component fallback)
+try:
+    from streamlit_folium import folium_static
+    folium_static(m, width=1100, height=550)
+except Exception:
+    import streamlit.components.v1 as components
+    components.html(m._repr_html_(), width=1100, height=550)

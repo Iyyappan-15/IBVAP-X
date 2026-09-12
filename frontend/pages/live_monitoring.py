@@ -15,15 +15,21 @@ Features:
   2. Entity Roster & Track Classification
   3. Live Actionable Priority Alerts Queue
   4. Cryptographic Evidence Chain (SHA-256)
-- Camera Degradation Demo toggle (programmatic blur + darkness)
-- Never loads entire video into RAM (frame-by-frame streaming via cv2.VideoCapture)
 """
 from __future__ import annotations
 
+import sys
 import os
+
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 import time
 import logging
 from typing import Dict, List, Any
+
 
 import cv2
 import numpy as np

@@ -9,7 +9,16 @@ AI-Based Intelligent Video Analytics Platform for Border Surveillance using exis
 """
 from __future__ import annotations
 
+
+import sys
+import os
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 import streamlit as st
+
 
 st.set_page_config(
     page_title="IBVAP-X — Border Video Intelligence Command Center",
