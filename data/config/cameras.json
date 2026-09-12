@@ -68,6 +68,38 @@
           ]
         }
       ]
+    },
+    {
+      "camera_id": "CAM-UPLOAD-01",
+      "name": "Upload Analysis Channel",
+      "location_description": "Uploaded video — simulated border camera feed",
+      "latitude": 31.6240,
+      "longitude": 74.8765,
+      "heading_degrees": 90.0,
+      "fov_degrees": 70.0,
+      "range_meters": 150.0,
+      "adjacent_cameras": ["CAM-01", "CAM-02"],
+      "boundary_vector": [1.0, 0.0],
+      "zones": [
+        {
+          "zone_name": "Upload Primary Zone",
+          "polygon_normalized": [
+            [0.1, 0.1],
+            [0.9, 0.1],
+            [0.9, 0.9],
+            [0.1, 0.9]
+          ]
+        },
+        {
+          "zone_name": "Upload Boundary Alert Zone",
+          "polygon_normalized": [
+            [0.6, 0.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [0.6, 1.0]
+          ]
+        }
+      ]
     }
   ]
 }

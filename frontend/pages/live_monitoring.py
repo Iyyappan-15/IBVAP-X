@@ -281,6 +281,301 @@ if start_clicked and selected_file_path:
     st.session_state["ibvapx_analysis_done"] = False
     st.session_state["ibvapx_summary"] = None
 
+    source = None
+    pipeline = None
+    init_error = None
+
+    try:
+        source = FileVideoSource(file_path=selected_file_path, camera_id=camera_id)
+        pipeline = IBVAPXPipeline(enable_demo_degradation=demo_degraded)
+    except Exception as e:
+        init_error = str(e)
+        logger.error("Pipeline init error: %s", e)
+
+    if init_error:
+        st.error(f"Could not initialise the analysis pipeline. {init_error}")
+    else:
+        st.markdown(f"#### 📡 Analysis Feed  —  `{source_label}`  ·  Camera: `{camera_id}`")
+
+        if demo_degraded:
+            st.warning(
+                "🎛️ **Camera Degradation Demo is ON** — "
+                "Blur and darkness applied programmatically to simulate a dirty lens."
+            )
+
+        frame_placeholder = st.empty()
+        progress_bar = st.progress(0)
+        stats_cols = st.columns(6)
+        stat_frames  = stats_cols[0].empty()
+        stat_fps     = stats_cols[1].empty()
+        stat_tracks  = stats_cols[2].empty()
+        stat_events  = stats_cols[3].empty()
+        stat_hi_pri  = stats_cols[4].empty()
+        stat_rel     = stats_cols[5].empty()
+
+        total_frames     = source.total_frames
+        source_fps       = source.fps if source.fps > 0 else 25.0
+        process_interval = max(1, int(round(source_fps / settings.PROCESS_FPS)))
+        frame_idx          = 0
+        processed_count    = 0
+        total_events       = 0
+        high_priority_count = 0
+        last_reliability_pct = 100.0
+        last_tracked_count = 0
+        # Track per-class counts for summary
+        class_counts: dict = {}
+        loop_start = time.time()
+
+        try:
+            while source.is_connected:
+                if st.session_state.get("ibvapx_stop_requested", False):
+                    st.warning("⏹ Analysis stopped by user. Partial results preserved.")
+                    break
+
+                frame_obj = source.get_frame()
+                if frame_obj is None:
+                    break
+
+                frame_idx += 1
+                if (frame_idx - 1) % process_interval != 0:
+                    continue
+
+                nparr = np.frombuffer(frame_obj.frame_bytes, np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if img is None:
+                    continue
+
+                infer_img, was_resized = resize_for_inference(img)
+
+                try:
+                    annotated, new_alerts = pipeline.process_frame(source, frame_obj, infer_img)
+                    if was_resized:
+                        annotated = cv2.resize(
+                            annotated,
+                            (img.shape[1], img.shape[0]),
+                            interpolation=cv2.INTER_LINEAR,
+                        )
+                except Exception as pipe_err:
+                    logger.error("Pipeline frame error: %s", pipe_err)
+                    annotated = img
+
+                new_alerts = new_alerts or []
+                processed_count += 1
+                total_events += len(new_alerts)
+                high_priority_count += sum(
+                    1 for a in new_alerts
+                    if hasattr(a, "event_priority")
+                    and str(a.event_priority).upper() in ("HIGH", "CRITICAL")
+                )
+
+                # Tally detected classes for summary report
+                try:
+                    for trk in pipeline.tracker.fallback_tracker.active_tracks.values():
+                        cname = trk.get("class_name", "unknown")
+                        class_counts[cname] = class_counts.get(cname, 0) + 1
+                except Exception:
+                    pass
+
+                # Reliability
+                try:
+                    rel_score = pipeline.reliability_engine.calculate_reliability(
+                        camera_id=camera_id,
+                        frame_id=frame_obj.frame_id,
+                        timestamp=frame_obj.timestamp,
+                        image_np=infer_img,
+                    )
+                    last_reliability_pct = rel_score.composite_score
+                except Exception:
+                    pass
+
+                # Active track count
+                try:
+                    last_tracked_count = len(
+                        pipeline.tracker.fallback_tracker.active_tracks
+                    )
+                except Exception:
+                    pass
+
+                # Source label overlay bar
+                cv2.rectangle(annotated, (0, 0), (annotated.shape[1], 28), (20, 20, 20), -1)
+                cv2.putText(
+                    annotated,
+                    f"[{source_label}]  Cam: {camera_id}  Frame: {frame_idx}/{total_frames}",
+                    (8, 18),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (0, 255, 200), 1, cv2.LINE_AA,
+                )
+
+                rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+                frame_placeholder.image(
+                    rgb,
+                    caption=f"Frame {frame_idx}/{total_frames} — {source_label} | {camera_id}",
+                    use_container_width=True,
+                )
+
+                progress_bar.progress(min(frame_idx / max(total_frames, 1), 1.0))
+
+                elapsed = time.time() - loop_start
+                live_fps = processed_count / elapsed if elapsed > 0 else 0.0
+                stat_frames.metric("Frames", f"{frame_idx}/{total_frames}")
+                stat_fps.metric("Processing FPS", f"{live_fps:.1f}")
+                stat_tracks.metric("Tracked Objects", last_tracked_count)
+                stat_events.metric("Events Detected", total_events)
+                stat_hi_pri.metric("High/Critical", high_priority_count)
+                rel_label = (
+                    "GOOD"     if last_reliability_pct >= settings.RELIABILITY_GOOD_THRESHOLD
+                    else "DEGRADED" if last_reliability_pct >= settings.RELIABILITY_DEGRADED_THRESHOLD
+                    else "POOR"
+                )
+                stat_rel.metric("Camera Reliability", f"{last_reliability_pct:.0f}% [{rel_label}]")
+
+                time.sleep(1.0 / settings.DISPLAY_FPS)
+
+        except Exception as loop_err:
+            logger.error("Analysis loop error: %s", loop_err)
+            st.error(
+                "An error occurred during analysis. Partial results have been preserved. "
+                f"Error type: {type(loop_err).__name__}"
+            )
+        finally:
+            if source:
+                source.release()
+
+        if not st.session_state.get("ibvapx_stop_requested", False):
+            progress_bar.progress(1.0)
+            st.success("✅ Analysis complete.")
+
+        elapsed_total = time.time() - loop_start
+        st.session_state["ibvapx_summary"] = {
+            "source_label": source_label,
+            "camera_id": camera_id,
+            "total_frames": total_frames,
+            "source_fps": round(source_fps, 2),
+            "processed_frames": processed_count,
+            "total_events": total_events,
+            "high_priority_count": high_priority_count,
+            "elapsed_seconds": elapsed_total,
+            "reliability_pct": last_reliability_pct,
+            "class_counts": dict(class_counts),
+            "stopped_early": st.session_state.get("ibvapx_stop_requested", False),
+        }
+        st.session_state["ibvapx_analysis_done"] = True
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST-PROCESSING SUMMARY UI  (Task 5 — full detailed report)
+# ─────────────────────────────────────────────────────────────────────────────
+if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx_summary"):
+    s = st.session_state["ibvapx_summary"]
+    st.markdown("---")
+    st.markdown("### 📊 Analysis Summary Report")
+
+    tag = "⚠️ STOPPED EARLY" if s["stopped_early"] else "✅ COMPLETE"
+    rel_status = (
+        "🟢 GOOD"     if s["reliability_pct"] >= settings.RELIABILITY_GOOD_THRESHOLD
+        else "🟡 DEGRADED" if s["reliability_pct"] >= settings.RELIABILITY_DEGRADED_THRESHOLD
+        else "🔴 POOR"
+    )
+
+    st.markdown(
+        f"**Status:** {tag} &nbsp;|&nbsp; "
+        f"**Source:** `{s['source_label']}` &nbsp;|&nbsp; "
+        f"**Camera:** `{s['camera_id']}`"
+    )
+
+    # ── Metric row 1 — Processing stats ──────────────────────────────────
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric("Frames Analysed",  f"{s['processed_frames']}/{s['total_frames']}")
+    m2.metric("Source FPS",       f"{s['source_fps']}")
+    m3.metric("Events Detected",  s["total_events"])
+    m4.metric("High/Critical",    s["high_priority_count"])
+    elapsed = s["elapsed_seconds"]
+    m5.metric(
+        "Analysis Time",
+        f"{int(elapsed)}s" if elapsed < 60 else f"{int(elapsed // 60)}m {int(elapsed % 60)}s",
+    )
+    m6.metric("Effective FPS", f"{s['processed_frames'] / max(elapsed, 0.1):.1f}")
+
+    # ── Metric row 2 — Intelligence signals ──────────────────────────────
+    st.markdown("#### 📡 Intelligence Signal Summary")
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Camera Reliability", f"{s['reliability_pct']:.0f}%", help=rel_status)
+    r2.metric("Camera Profile", s["camera_id"])
+    r3.metric(
+        "Coverage Zone",
+        "Upload Primary Zone" if "UPLOAD" in s["camera_id"] else "Sector Zones Active",
+    )
+    r4.metric(
+        "Reliability Status",
+        rel_status,
+    )
+
+    # ── Detected classes breakdown ────────────────────────────────────────
+    st.markdown("#### 🔍 Detected Object Classes")
+    class_counts = s.get("class_counts", {})
+    if class_counts:
+        cc_cols = st.columns(min(len(class_counts), 5))
+        for i, (cname, cnt) in enumerate(sorted(class_counts.items(), key=lambda x: -x[1])):
+            cc_cols[i % len(cc_cols)].metric(f"🏷️ {cname.capitalize()}", f"{cnt} detections")
+    else:
+        st.info(
+            "No objects were classified during this run. "
+            "This can happen if the YOLO confidence threshold is too high for the lighting conditions, "
+            "or if the video contains only background with no persons, cars, or vehicles visible at ≥50% confidence."
+        )
+
+    # ── Reliability note ──────────────────────────────────────────────────
+    if s["reliability_pct"] < settings.RELIABILITY_DEGRADED_THRESHOLD:
+        st.error(
+            f"🔴 **Camera feed quality was POOR ({s['reliability_pct']:.0f}%)** during this analysis. "
+            "Detection accuracy is reduced. Evidence from this session should be verified with a secondary camera."
+        )
+    elif s["reliability_pct"] < settings.RELIABILITY_GOOD_THRESHOLD:
+        st.warning(
+            f"🟡 **Camera feed quality was DEGRADED ({s['reliability_pct']:.0f}%)** during this analysis. "
+            "Actionability is automatically downgraded for alerts from this session."
+        )
+
+    # ── Navigation buttons ────────────────────────────────────────────────
+    st.markdown("#### Navigate Results")
+    nav1, nav2, nav3, nav4 = st.columns(4)
+    with nav1:
+        if st.button("🚨 VIEW ALERTS", use_container_width=True):
+            st.switch_page("pages/alerts.py")
+    with nav2:
+        if st.button("🔒 VIEW EVIDENCE", use_container_width=True):
+            st.switch_page("pages/evidence.py")
+    with nav3:
+        if st.button("📡 VIEW CAMERA HEALTH", use_container_width=True):
+            st.switch_page("pages/camera_health.py")
+    with nav4:
+        if st.button("📋 VIEW FULL REPORT", use_container_width=True):
+            st.switch_page("pages/overview.py")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR STATUS PANEL
+# ─────────────────────────────────────────────────────────────────────────────
+st.sidebar.markdown("---")
+st.sidebar.subheader("⚡ Pipeline Status")
+st.sidebar.info(
+    "**Detection:** YOLOv8n (CPU)\n\n"
+    "**Tracking:** ByteTrack / IoU Fallback\n\n"
+    f"**Processing:** {settings.PROCESS_FPS:.0f} FPS target\n\n"
+    "**Evidence:** SHA-256 tamper-evident\n\n"
+    "**Priority:** Independent of Reliability"
+)
+
+if demo_degraded:
+    st.sidebar.warning("⚡ DEGRADATION DEMO: ON")
+    st.sidebar.caption(
+        "Programmatic blur (kernel=51) + darkness (0.3x) applied. "
+        "Camera Reliability Engine will flag this as POOR."
+    )
+
+    # Reset state
+    st.session_state["ibvapx_stop_requested"] = False
+    st.session_state["ibvapx_analysis_done"] = False
+    st.session_state["ibvapx_summary"] = None
+
     # ── Source / pipeline initialisation ─────────────────────────────────────
     source = None
     pipeline = None
