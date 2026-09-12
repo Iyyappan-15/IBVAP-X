@@ -11,6 +11,10 @@ from backend.detection.fence_detector import FenceDetector
 
 logger = logging.getLogger(__name__)
 
+class ModelNotFoundError(Exception):
+    """Raised when YOLO weights file is missing."""
+    pass
+
 
 def suppress_nested_subboxes(detections: List[Detection], containment_threshold: float = 0.60) -> List[Detection]:
     """
@@ -90,19 +94,27 @@ class ObjectDetector:
 
         from ultralytics import YOLO
 
-        # Auto-download model if missing (essential for 1-click Streamlit Cloud deployment)
+        # Auto-download default model if missing; raise error for custom invalid paths
         if not os.path.exists(self.model_path):
-            os.makedirs(os.path.dirname(os.path.abspath(self.model_path)), exist_ok=True)
-            logger.info(f"[Detector] Weights not found at '{self.model_path}'. Auto-downloading YOLOv8n weights...")
-            self.model = YOLO("yolov8n.pt")
-            try:
-                import shutil
-                if os.path.exists("yolov8n.pt") and self.model_path != "yolov8n.pt":
-                    shutil.copy("yolov8n.pt", self.model_path)
-            except Exception:
-                pass
+            if self.model_path == settings.YOLO_MODEL_PATH and "yolov8n.pt" in self.model_path:
+                os.makedirs(os.path.dirname(os.path.abspath(self.model_path)), exist_ok=True)
+                logger.info(f"[Detector] Default weights not found at '{self.model_path}'. Auto-downloading YOLOv8n weights...")
+                self.model = YOLO("yolov8n.pt")
+                try:
+                    import shutil
+                    if os.path.exists("yolov8n.pt") and self.model_path != "yolov8n.pt":
+                        shutil.copy("yolov8n.pt", self.model_path)
+                except Exception:
+                    pass
+            else:
+                raise ModelNotFoundError(
+                    f"YOLO model weights file not found at '{self.model_path}'. "
+                    f"Run 'python scripts/download_model.py' to download weights."
+                )
         else:
             self.model = YOLO(self.model_path)
+
+
 
         self.model.to(self.device)
 
@@ -166,14 +178,16 @@ class ObjectDetector:
         # 2. Apply Sub-Box Containment Suppression
         clean_detections = suppress_nested_subboxes(raw_detections, containment_threshold=0.60)
 
-        # 3. Detect Perimeter Fence & Boundary Structures
+        # 3. Detect Perimeter Fence & Boundary Structures (Strict rejection of road asphalt & vehicles)
         fence_dets = self.fence_detector.detect_fence(
             image_np,
             camera_id=frame_obj.camera_id,
             timestamp=frame_obj.timestamp,
-            frame_id=frame_obj.frame_id
+            frame_id=frame_obj.frame_id,
+            existing_detections=clean_detections
         )
         if fence_dets:
             clean_detections.extend(fence_dets)
+
 
         return clean_detections
