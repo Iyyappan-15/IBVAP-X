@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
     # Object Detection (YOLO)
     YOLO_MODEL_PATH: str = "data/models/yolov8n.pt"
-    YOLO_CONFIDENCE_THRESHOLD: float = 0.50
+    YOLO_CONFIDENCE_THRESHOLD: float = 0.30
     YOLO_DETECT_CLASSES: str = "person,car,motorcycle,bus,truck"
 
     # Object Tracking

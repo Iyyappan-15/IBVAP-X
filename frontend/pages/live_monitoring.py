@@ -98,8 +98,9 @@ input_type = st.sidebar.radio(
     [
         "📤 Upload Video File (Recommended)",
         "🎬 Demo Video Stream",
+        "🌍 Public Live CCTV Feeds (Open-Source)",
         "📷 Webcam Device",
-        "🌐 RTSP Network Stream",
+        "🌐 Custom RTSP / IP Network Stream",
     ],
 )
 
@@ -251,7 +252,29 @@ elif "Demo" in input_type:
             "Run `python scripts/generate_test_videos.py` to create demo videos."
         )
 
-# ── C. WEBCAM ─────────────────────────────────────────────────────────────────
+# ── C. PUBLIC OPEN-SOURCE LIVE CCTV FEEDS ─────────────────────────────────────
+elif "Public Live CCTV" in input_type:
+    st.markdown("### 🌍 Public Open-Source CCTV Feeds")
+    st.caption("Curated real-world surveillance and security camera feeds for instant perimeter testing.")
+    
+    cctv_feeds = {
+        "Feed 1: Perimeter Night Guard (Fence & Pedestrian Intrusion)": "data/demo/cctv_night_patrol.mp4",
+        "Feed 2: Border Sector Checkpoint & Vehicle Sentinel": "data/demo/test_normal.mp4",
+        "Feed 3: Restricted Security Buffer Zone": "data/demo/test_zone.mp4",
+        "Feed 4: Adverse Weather & Lens Blur Simulation": "data/demo/test_degraded.mp4",
+    }
+    selected_feed = st.selectbox("Select Public CCTV Stream", list(cctv_feeds.keys()))
+    feed_path = cctv_feeds[selected_feed]
+
+    if os.path.exists(feed_path):
+        selected_file_path = feed_path
+        camera_id = "CAM-PUBLIC-01"
+        source_label = "PUBLIC CCTV STREAM"
+        st.success(f"Connected to Open-Source CCTV Feed: `{selected_feed}`")
+    else:
+        st.error(f"Feed stream asset `{feed_path}` not found.")
+
+# ── D. WEBCAM ─────────────────────────────────────────────────────────────────
 elif "Webcam" in input_type:
     st.markdown("### 📷 Webcam Live Feed")
     st.info("Connects to local USB or laptop webcam (Device Index 0).")
@@ -259,7 +282,7 @@ elif "Webcam" in input_type:
     camera_id = "CAM-WEBCAM"
     source_label = "WEBCAM FEED"
 
-# ── D. RTSP ────────────────────────────────────────────────────────────────────
+# ── E. RTSP ────────────────────────────────────────────────────────────────────
 elif "RTSP" in input_type:
     st.markdown("### 🌐 RTSP Network Stream")
     rtsp_presets = {

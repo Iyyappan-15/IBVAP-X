@@ -138,9 +138,23 @@ class ObjectDetector:
                 logger.warning(f"[Detector] No image content available for frame {frame_obj.frame_id}")
                 return []
 
-        # 1. Run YOLO inference
+        # 1. Adaptive contrast enhancement for night / low-light CCTV
+        yolo_input = image_np
+        try:
+            gray_check = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
+            if np.mean(gray_check) < 70.0:
+                lab = cv2.cvtColor(image_np, cv2.COLOR_BGR2LAB)
+                l, a, b = cv2.split(lab)
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                cl = clahe.apply(l)
+                enhanced_lab = cv2.merge((cl, a, b))
+                yolo_input = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
+        except Exception:
+            yolo_input = image_np
+
+        # 2. Run YOLO inference
         results = self.model(
-            image_np,
+            yolo_input,
             conf=self.confidence_threshold,
             iou=0.45,
             agnostic_nms=True,
