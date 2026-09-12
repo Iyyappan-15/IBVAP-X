@@ -1,0 +1,16 @@
+{
+  "evidence_id": "EVD-5F209287",
+  "alert_id": "ALT-75844422",
+  "camera_id": "CAM-UPLOAD-01",
+  "track_id": 1,
+  "class_name": "car",
+  "timestamp": 1789187502.7904627,
+  "event_priority": "HIGH",
+  "camera_reliability": "GOOD",
+  "actionability": "HIGH",
+  "why_reasons": [
+    "Restricted zone entry detected (Upload Primary Zone)",
+    "Trajectory movement vector directed toward border boundary (TOWARD_BOUNDARY)",
+    "Secondary anomaly engine signal detected (Anomaly Index: 1.00)"
+  ]
+}
