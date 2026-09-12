@@ -5,9 +5,11 @@ IBVAP-X — Live Video Monitoring & Intelligence Stream
 Primary user-facing prototype page.
 
 Features:
-- Cloud-optimized real-time video streaming (WebSocket compression, 0 stutter)
+- Smooth continuous frame-by-frame video playback with real-time UI animation
+- Direct JPEG WebSocket streaming for fast, non-freezing frame rendering
+- Interactive playback speed slider (5 FPS - 30 FPS)
 - Video Upload (MP4, AVI, MOV) + Demo Stream + Webcam + RTSP abstractions
-- Flexible Playback & Sampling Speed (Real-Time 25 FPS vs 100% Full Analysis)
+- High-Precision analysis across all video frames
 - Sub-box containment filtering (no ghost #3 car inside #1 car)
 - Physical Fence & Perimeter Structure detection (#FENCE)
 - Motion-only trajectory trails (no lines on parked cars, no jump glitches)
@@ -99,23 +101,25 @@ input_type = st.sidebar.radio(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("⚙️ Playback & Performance")
+st.sidebar.subheader("🎬 Playback & Video Speed")
 
-processing_mode = st.sidebar.radio(
-    "Analysis Mode",
-    [
-        "🚀 Smooth Real-Time Playback (Sampled ~8 FPS)",
-        "🎯 High Precision (100% Every Frame — 240/240)",
-    ],
-    index=0,
-    help="Smooth Real-Time analyzes at ~8 FPS for fluid browser playback. High Precision processes every single frame.",
+playback_fps = st.sidebar.slider(
+    "Video Playback Speed (FPS)",
+    min_value=5,
+    max_value=30,
+    value=15,
+    step=5,
+    help="Controls how fast frames animate across the screen. 15-20 FPS gives a smooth, natural video feel.",
 )
 
-playback_speed = st.sidebar.select_slider(
-    "Display Frame Delay",
-    options=["⚡ Turbo (Fastest)", "▶️ Fluid (Real-Time)", "🐢 Inspect (Slow)"],
-    value="▶️ Fluid (Real-Time)",
-    help="Adjust frame display timing for cloud WebSocket streaming.",
+processing_mode = st.sidebar.radio(
+    "Frame Sampling",
+    [
+        "🎯 High Precision (100% Every Frame — 240/240)",
+        "⚡ Fast Sampling (Sampled ~10 FPS)",
+    ],
+    index=0,
+    help="High Precision renders every single frame sequentially like a real video.",
 )
 
 demo_degraded = st.sidebar.checkbox(
@@ -277,7 +281,7 @@ if stop_clicked:
     st.session_state["ibvapx_stop_requested"] = True
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MAIN ANALYSIS LOOP (CLOUD STREAMING OPTIMIZED)
+# MAIN ANALYSIS LOOP (CONTINUOUS SMOOTH PLAYBACK)
 # ─────────────────────────────────────────────────────────────────────────────
 if start_clicked and selected_file_path:
     st.session_state["ibvapx_stop_requested"] = False
@@ -303,6 +307,7 @@ if start_clicked and selected_file_path:
         if demo_degraded:
             st.warning("🎛️ **Camera Degradation Simulation Active** — Programmatic blur & darkness applied.")
 
+        # Create persistent placeholder that updates on every single frame
         frame_placeholder = st.empty()
         progress_bar = st.progress(0)
         stats_cols = st.columns(6)
@@ -316,19 +321,14 @@ if start_clicked and selected_file_path:
         total_frames = source.total_frames
         source_fps   = source.fps if source.fps > 0 else 25.0
 
-        # Dynamic Interval & Sleep for Cloud WebSockets
+        # Frame step mode
         if "100%" in processing_mode:
             process_interval = 1
         else:
-            process_interval = max(1, int(round(source_fps / 8.0)))
+            process_interval = max(1, int(round(source_fps / 10.0)))
 
-        # Frame delay for smooth cloud streaming
-        if "Turbo" in playback_speed:
-            frame_sleep = 0.005
-        elif "Inspect" in playback_speed:
-            frame_sleep = 0.08
-        else:
-            frame_sleep = 0.02
+        # Frame delay for smooth animation
+        frame_delay = max(0.01, 1.0 / float(playback_fps))
 
         frame_idx           = 0
         processed_count     = 0
@@ -415,7 +415,7 @@ if start_clicked and selected_file_path:
                         seen_entities[ent_key]["frames_seen"] += 1
                         seen_entities[ent_key]["trajectory"] = list(tdata.get("trajectory", []))
 
-                # Also record detected physical fence if present
+                # Always record detected physical fence
                 if hasattr(pipeline.detector, "fence_detector") and pipeline.detector.fence_detector.cached_fence_bbox:
                     seen_entities["fence_perimeter"] = {
                         "track_id": "PERIMETER",
@@ -450,14 +450,10 @@ if start_clicked and selected_file_path:
                     (0, 255, 200), 1, cv2.LINE_AA,
                 )
 
-                # Web-Optimized Image Streaming: Scale down to 854x480 for fast WebSocket frame rate
-                disp_w = 854
-                disp_h = int(annotated.shape[0] * (disp_w / max(1, annotated.shape[1])))
-                disp_img = cv2.resize(annotated, (disp_w, disp_h), interpolation=cv2.INTER_LINEAR)
-                rgb = cv2.cvtColor(disp_img, cv2.COLOR_BGR2RGB)
-
+                # Convert to high-speed JPEG bytes so Streamlit re-renders the image on every frame without buffering
+                _, jpeg_bytes = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 frame_placeholder.image(
-                    rgb,
+                    jpeg_bytes.tobytes(),
                     caption=f"Frame {frame_idx}/{total_frames} — {source_label} | {camera_id}",
                 )
 
@@ -477,7 +473,7 @@ if start_clicked and selected_file_path:
                 )
                 stat_rel.metric("Camera Reliability", f"{last_reliability_pct:.0f}% [{rel_label}]")
 
-                time.sleep(frame_sleep)
+                time.sleep(frame_delay)
 
         except Exception as loop_err:
             logger.error("Analysis loop error: %s", loop_err)
@@ -679,5 +675,5 @@ st.sidebar.info(
     "**Detection:** YOLOv8n + Fence Detector\n\n"
     "**Tracking:** ByteTrack Kalman Engine\n\n"
     "**Perimeter:** Physical Fence Analysis Active\n\n"
-    "**Streaming:** WebSocket Optimized (Fluid Playback)"
+    "**Streaming:** Direct JPEG Frame Render"
 )

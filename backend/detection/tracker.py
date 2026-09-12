@@ -306,10 +306,12 @@ class ObjectTracker:
         CLASS_COLORS = {
             "person": (0, 140, 255),       # Orange
             "car": (255, 180, 0),          # Cyan/Amber
+            "fence": (0, 230, 70),         # Bright Neon Green
             "truck": (255, 100, 0),        # Deep Blue
             "bus": (200, 200, 0),          # Cyan
             "motorcycle": (0, 220, 255),   # Yellow
         }
+
 
         for track in tracks:
             x1, y1, x2, y2 = [int(v) for v in track.bbox]
