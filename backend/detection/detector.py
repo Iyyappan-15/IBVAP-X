@@ -7,6 +7,7 @@ import torch
 
 from backend.config import settings
 from backend.interfaces import Detection, Frame
+from backend.detection.fence_detector import FenceDetector
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,6 @@ def suppress_nested_subboxes(detections: List[Detection], containment_threshold:
     if len(detections) <= 1:
         return detections
 
-    # Sort by bounding box area descending (largest boxes first)
     def box_area(b):
         return max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
 
@@ -62,7 +62,6 @@ def suppress_nested_subboxes(detections: List[Detection], containment_threshold:
             y2 = min(a_box[3], b_box[3])
             intersection = max(0.0, x2 - x1) * max(0.0, y2 - y1)
 
-            # Containment ratio: how much of Box B is inside Box A
             containment = intersection / area_b
 
             if containment >= containment_threshold and area_a > area_b:
@@ -76,7 +75,7 @@ def suppress_nested_subboxes(detections: List[Detection], containment_threshold:
 
 
 class ObjectDetector:
-    """Wrapper around Ultralytics YOLOv8 for Object Detection with Sub-Box Containment Filtering."""
+    """Wrapper around Ultralytics YOLOv8 for Object Detection + Fence & Perimeter Structure Detection."""
 
     def __init__(
         self,
@@ -87,6 +86,7 @@ class ObjectDetector:
         self.model_path = model_path or settings.YOLO_MODEL_PATH
         self.confidence_threshold = confidence_threshold if confidence_threshold is not None else settings.YOLO_CONFIDENCE_THRESHOLD
         self.target_classes = target_classes or settings.detect_classes_list
+        self.fence_detector = FenceDetector()
 
         if not os.path.exists(self.model_path):
             raise ModelNotFoundError(
@@ -111,8 +111,8 @@ class ObjectDetector:
 
     def detect(self, frame_obj: Frame, image_np: np.ndarray = None) -> List[Detection]:
         """
-        Runs object detection on a Frame object or numpy array image.
-        Returns a list of clean Detection objects without nested duplicate boxes.
+        Runs object detection + fence detection on a Frame or image.
+        Returns clean Detection objects without nested duplicate boxes.
         """
         if image_np is None:
             if frame_obj.frame_bytes is not None:
@@ -122,7 +122,7 @@ class ObjectDetector:
                 logger.warning(f"[Detector] No image content available for frame {frame_obj.frame_id}")
                 return []
 
-        # Run inference
+        # 1. Run YOLO inference
         results = self.model(
             image_np,
             conf=self.confidence_threshold,
@@ -159,6 +159,17 @@ class ObjectDetector:
                 )
                 raw_detections.append(det)
 
-        # Apply Nested Sub-Box Suppression to eliminate duplicate parts (e.g. window/door inside car)
+        # 2. Apply Sub-Box Containment Suppression
         clean_detections = suppress_nested_subboxes(raw_detections, containment_threshold=0.60)
+
+        # 3. Detect Perimeter Fence & Boundary Structures
+        fence_dets = self.fence_detector.detect_fence(
+            image_np,
+            camera_id=frame_obj.camera_id,
+            timestamp=frame_obj.timestamp,
+            frame_id=frame_obj.frame_id
+        )
+        if fence_dets:
+            clean_detections.extend(fence_dets)
+
         return clean_detections
