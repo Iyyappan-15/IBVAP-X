@@ -684,7 +684,14 @@ if start_clicked and selected_file_path:
                 stat_objs.metric("Detections", len(current_dets))
                 stat_tracks.metric("Active Tracks", len(active_t))
                 stat_alerts.metric("Alerts", len(all_alerts_collected))
-                rel_badge = getattr(rel_obj, "status", CameraStatus.GOOD).value if getattr(rel_obj, "status", None) else ("GOOD" if last_reliability_pct >= settings.RELIABILITY_GOOD_THRESHOLD else ("DEGRADED" if last_reliability_pct >= settings.RELIABILITY_DEGRADED_THRESHOLD else "POOR"))
+
+                rel_obj = getattr(pipeline, "last_reliability", None)
+                if rel_obj and hasattr(rel_obj, "status"):
+                    rel_status_val = getattr(rel_obj.status, "value", str(rel_obj.status))
+                    rel_badge = str(rel_status_val).replace("CameraStatus.", "").replace("CAMERASTATUS.", "")
+                else:
+                    rel_badge = "GOOD" if last_reliability_pct >= settings.RELIABILITY_GOOD_THRESHOLD else ("DEGRADED" if last_reliability_pct >= settings.RELIABILITY_DEGRADED_THRESHOLD else "POOR")
+
                 stat_rel.metric("Camera Reliability", f"{last_reliability_pct:.0f}% [{rel_badge}]")
 
                 time.sleep(frame_delay)
