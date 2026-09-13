@@ -461,6 +461,22 @@ if start_clicked and selected_file_path:
     else:
         st.markdown(f"#### 🎥 Live Surveillance Stream — `{source_label}` (Camera: `{camera_id}`)")
 
+        with st.expander("🔍 Model & Inference Engine Information", expanded=False):
+            m_info = pipeline.get_model_info() if hasattr(pipeline, "get_model_info") else {}
+            m_name = m_info.get("model_name", "yolov8n.pt")
+            m_dev = m_info.get("device", "cpu")
+            m_conf = m_info.get("confidence_threshold", 0.30)
+            m_sz = m_info.get("image_size", 640)
+            m_unsupp = m_info.get("unsupported_classes", ["fence", "stone"])
+            
+            mc1, mc2, mc3, mc4 = st.columns(4)
+            mc1.markdown(f"**Loaded Model:** `{m_name}`")
+            mc2.markdown(f"**Device:** `{m_dev}` | **Size:** `{m_sz}px`")
+            mc3.markdown(f"**Conf Thresh:** `{m_conf}`")
+            mc4.markdown(f"**Unsupported:** `{', '.join(m_unsupp)}`")
+            if m_unsupp:
+                st.info("ℹ️ Standard `yolov8n.pt` is a COCO model. Domain classes like `fence` or `stone` are not in COCO weights. Provide custom weights in settings to enable custom classes.")
+
         frame_placeholder = st.empty()
         progress_bar = st.progress(0)
 
@@ -657,14 +673,18 @@ if start_clicked and selected_file_path:
 
                 progress_bar.progress(min(frame_idx / max(total_frames, 1), 1.0))
 
+                # Retrieve current frame analysis result contract
+                frame_res = getattr(pipeline, "last_frame_result", None)
+                current_dets = frame_res.current_detections if frame_res else getattr(pipeline, "last_detections", [])
+
                 elapsed = time.time() - loop_start
                 live_fps = processed_count / elapsed if elapsed > 0 else 0.0
                 stat_frames.metric("Frames", f"{frame_idx}/{total_frames}")
                 stat_fps.metric("Processing FPS", f"{live_fps:.1f}")
-                stat_objs.metric("Detections", raw_detections_count)
+                stat_objs.metric("Detections", len(current_dets))
                 stat_tracks.metric("Active Tracks", len(active_t))
-                stat_alerts.metric("Alerts", priority_alerts_count)
-                rel_badge = "GOOD" if last_reliability_pct >= settings.RELIABILITY_GOOD_THRESHOLD else ("DEGRADED" if last_reliability_pct >= settings.RELIABILITY_DEGRADED_THRESHOLD else "POOR")
+                stat_alerts.metric("Alerts", len(all_alerts_collected))
+                rel_badge = getattr(rel_obj, "status", CameraStatus.GOOD).value if getattr(rel_obj, "status", None) else ("GOOD" if last_reliability_pct >= settings.RELIABILITY_GOOD_THRESHOLD else ("DEGRADED" if last_reliability_pct >= settings.RELIABILITY_DEGRADED_THRESHOLD else "POOR"))
                 stat_rel.metric("Camera Reliability", f"{last_reliability_pct:.0f}% [{rel_badge}]")
 
                 time.sleep(frame_delay)

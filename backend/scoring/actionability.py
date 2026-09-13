@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Tuple
 from backend.interfaces import EventPriority, CameraStatus, Actionability
 
 class ActionabilityMatrix:
@@ -10,33 +10,24 @@ class ActionabilityMatrix:
     @staticmethod
     def evaluate(
         priority: EventPriority,
-        reliability_status: CameraStatus,
-        camera_broken: bool = False
+        reliability_status: CameraStatus
     ) -> Tuple[Actionability, str]:
         """
         Returns Tuple[Actionability (HIGH|MEDIUM|LOW), action_recommendation_text].
-
-        Special Rule: If camera_broken is True, this is ALWAYS a HIGH actionability event
-        regardless of priority level — physical destruction of surveillance hardware
-        requires immediate physical response.
         """
-        # ── Camera Broken Override Rule ──────────────────────────────────────────
-        # Physical camera destruction = highest possible threat to surveillance integrity.
-        # Cannot dismiss or downgrade — always dispatch immediately.
-        if camera_broken:
-            return (
-                Actionability.HIGH,
-                "CRITICAL: Camera physically destroyed / lens shattered. "
-                "Immediate physical dispatch to camera post required. "
-                "Switch to adjacent camera feed. Suspect confirmed in vicinity."
-            )
-
-        # OFFLINE Camera handling
+        # OFFLINE Camera handling — observations cannot be visually verified
         if reliability_status == CameraStatus.OFFLINE:
-            return (
-                Actionability.LOW,
-                "Camera offline or missing signal. Recommend immediate technician dispatch / camera verification."
-            )
+            if priority in [EventPriority.HIGH, EventPriority.CRITICAL]:
+                return (
+                    Actionability.MEDIUM,
+                    "High-priority activity detected before camera loss. Visual verification unavailable. "
+                    "Recommend technician dispatch / alternate sensor verification."
+                )
+            else:
+                return (
+                    Actionability.LOW,
+                    "Camera offline or missing signal. Recommend technician verification."
+                )
 
         # CRITICAL Priority Handling
         if priority == EventPriority.CRITICAL:

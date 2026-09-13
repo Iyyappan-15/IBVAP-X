@@ -67,18 +67,12 @@ class PriorityEngine:
             score += 15.0
             reasons.append("Adverse atmospheric cover (Fog / Low-visibility snow conditions)")
 
-        # 9. Camera Physically Broken / Destroyed (+40) → VERY HIGH THREAT
-        # Physical destruction of surveillance hardware is a severe escalation event.
-        if getattr(context_event, "camera_broken", False):
-            score += 40.0
-            reasons.append("CRITICAL: Camera physically destroyed / lens shattered — sensor offline")
-
-        # 10. Cross-Camera Confirmation (+15)
+        # 9. Cross-Camera Confirmation (+15)
         if cross_camera_confirmed:
             score += 15.0
             reasons.append("Corroborating event confirmed across adjacent camera feed")
 
-        # 11. Secondary Anomaly Signal (+10)
+        # 10. Secondary Anomaly Signal (+10)
         if anomaly_score is not None and anomaly_score >= settings.ANOMALY_SCORE_THRESHOLD:
             score += 10.0
             reasons.append(f"Secondary anomaly engine signal detected (Anomaly Index: {anomaly_score:.2f})")
@@ -174,13 +168,6 @@ class PriorityEngine:
                 "points": 15.0,
                 "active": True,
                 "detail": "Fog / low-visibility atmospheric occlusion"
-            })
-        if getattr(context_event, "camera_broken", False):
-            factors.append({
-                "name": "Camera Physically Destroyed",
-                "points": 40.0,
-                "active": True,
-                "detail": "CRITICAL: Lens shattered / sensor offline — hardware attack confirmed"
             })
 
         return factors

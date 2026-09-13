@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from backend.config import settings
-from backend.interfaces import Detection, Frame
+from backend.interfaces import Detection, Frame, DetectionSource
 from backend.detection.fence_detector import FenceDetector
 
 logger = logging.getLogger(__name__)
@@ -118,23 +118,35 @@ class ObjectDetector:
 
         self.model.to(self.device)
 
-        # Expanded surveillance classes (including handheld objects, luggage, tools)
-        self.surveillance_classes = {
-            "person", "car", "truck", "bus", "motorcycle", "bicycle",
-            "backpack", "handbag", "suitcase", "sports ball", "bottle",
-            "knife", "baseball bat", "cell phone", "umbrella", "scissors"
-        }
-        if target_classes:
-            self.target_classes = target_classes
-        else:
-            self.target_classes = list(self.surveillance_classes.union(set(settings.detect_classes_list)))
+        # Inspect actual model classes
+        self.available_model_classes = []
+        if hasattr(self.model, "names") and self.model.names:
+            self.available_model_classes = [name.lower() for name in self.model.names.values()]
 
-        # Map class names to class IDs for configured target classes
+        # Identify requested domain classes unsupported by this model
+        domain_requested = ["fence", "stone", "rock"]
+        self.unsupported_classes = [c for c in domain_requested if c not in self.available_model_classes]
+
+        # Map class names to class IDs for configured target classes present in model
         self.target_class_ids = []
         if hasattr(self.model, "names"):
             for cid, cname in self.model.names.items():
                 if cname.lower() in [tc.lower() for tc in self.target_classes]:
                     self.target_class_ids.append(cid)
+
+    def get_model_info(self) -> dict:
+        """Returns structured transparency metadata about the loaded detection model."""
+        return {
+            "model_name": os.path.basename(self.model_path),
+            "model_path": self.model_path,
+            "device": self.device,
+            "confidence_threshold": self.confidence_threshold,
+            "iou_threshold": settings.YOLO_IOU_THRESHOLD,
+            "image_size": settings.YOLO_IMAGE_SIZE,
+            "total_classes": len(self.available_model_classes),
+            "supported_classes": self.available_model_classes[:10],  # Sample for UI display
+            "unsupported_classes": self.unsupported_classes
+        }
 
     def _detect_handheld_objects(
         self,
@@ -283,7 +295,8 @@ class ObjectDetector:
                                               round(ox2, 2), round(oy2, 2)],
                                         camera_id=camera_id,
                                         timestamp=timestamp,
-                                        frame_id=frame_id
+                                        frame_id=frame_id,
+                                        source=DetectionSource.SCENE_ANALYSIS
                                     )
                                 )
                                 break  # One candidate per ROI
@@ -349,10 +362,6 @@ class ObjectDetector:
                 if conf < effective_conf:
                     continue
 
-                # Map sports ball / bottle / phone near hand to stone/object if relevant
-                if cls_name.lower() in ["sports ball", "frisbee"]:
-                    cls_name = "stone"
-
                 det = Detection(
                     class_id=cls_id,
                     class_name=cls_name,
@@ -360,7 +369,8 @@ class ObjectDetector:
                     bbox=[round(v, 2) for v in xyxy],
                     camera_id=frame_obj.camera_id,
                     timestamp=frame_obj.timestamp,
-                    frame_id=frame_obj.frame_id
+                    frame_id=frame_obj.frame_id,
+                    source=DetectionSource.YOLO
                 )
                 raw_detections.append(det)
 

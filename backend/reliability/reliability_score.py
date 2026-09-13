@@ -1,6 +1,6 @@
 import time
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict
 import cv2
 import numpy as np
 
@@ -20,7 +20,6 @@ def apply_demo_degradation(image_np: np.ndarray, blur_ksize: int = 51, brightnes
 
     degraded = image_np.copy()
     if blur_ksize > 1:
-        # Ensure ksize is odd
         if blur_ksize % 2 == 0:
             blur_ksize += 1
         degraded = cv2.GaussianBlur(degraded, (blur_ksize, blur_ksize), 0)
@@ -32,7 +31,10 @@ def apply_demo_degradation(image_np: np.ndarray, blur_ksize: int = 51, brightnes
 
 
 class CameraReliabilityEngine:
-    """Computes composite camera reliability score from independent sub-metric analyzers."""
+    """
+    Computes composite camera reliability score from independent sub-metric analyzers
+    using a rolling window and adaptive temporal hysteresis to ensure smooth, stable status transitions.
+    """
 
     def __init__(self):
         self.blur_analyzer = BlurAnalyzer()
@@ -46,6 +48,15 @@ class CameraReliabilityEngine:
         self.w_frame = settings.RELIABILITY_WEIGHT_FRAME
         self.w_obstruction = settings.RELIABILITY_WEIGHT_OBSTRUCTION
 
+        self.window_size = settings.RELIABILITY_WINDOW_FRAMES
+        self.hysteresis_frames = settings.RELIABILITY_HYSTERESIS_FRAMES
+
+        # Rolling history state per camera
+        # camera_id -> {"blur": [], "brightness": [], "frame": [], "obstruction": [], "composite": []}
+        self.history: Dict[str, Dict[str, List[float]]] = {}
+        # camera_id -> {"confirmed_status": CameraStatus, "candidate_status": CameraStatus, "candidate_count": int}
+        self.status_state: Dict[str, Dict] = {}
+
     def calculate_reliability(
         self,
         camera_id: str,
@@ -56,65 +67,122 @@ class CameraReliabilityEngine:
         reasons: List[str] = []
 
         if image_np is None or image_np.size == 0:
-            return ReliabilityScore(
-                camera_id=camera_id,
-                timestamp=timestamp or time.time(),
-                blur_score=0.0,
-                brightness_score=0.0,
-                frame_health_score=0.0,
-                obstruction_score=0.0,
-                composite_reliability_score=0.0,
-                status=CameraStatus.OFFLINE,
-                reasons=["No video frame data available (Camera offline)"]
-            )
-
-        # 1. Blur Analysis
-        b_score, b_raw, b_reason = self.blur_analyzer.analyze(image_np)
-        if b_reason:
-            reasons.append(b_reason)
-
-        # 2. Brightness Analysis
-        br_score, br_raw, br_reason = self.brightness_analyzer.analyze(image_np)
-        if br_reason:
-            reasons.append(br_reason)
-
-        # 3. Frame Health Analysis
-        fh_score, fh_reason = self.frame_analyzer.analyze(camera_id, frame_id, timestamp)
-        if fh_reason:
-            reasons.append(fh_reason)
-
-        # 4. Obstruction Analysis
-        obs_score, obs_reason = self.obstruction_analyzer.analyze(image_np)
-        if obs_reason:
-            reasons.append(obs_reason)
-
-        # Calculate composite weighted reliability score
-        composite = (
-            (b_score * self.w_blur) +
-            (br_score * self.w_brightness) +
-            (fh_score * self.w_frame) +
-            (obs_score * self.w_obstruction)
-        )
-        composite = round(min(100.0, max(0.0, composite)), 1)
-
-        # Determine Camera Status classification
-        if composite >= settings.RELIABILITY_GOOD_THRESHOLD:
-            status = CameraStatus.GOOD
-        elif composite >= settings.RELIABILITY_DEGRADED_THRESHOLD:
-            status = CameraStatus.DEGRADED
-        elif composite >= settings.RELIABILITY_POOR_THRESHOLD:
-            status = CameraStatus.POOR
+            raw_b, raw_br, raw_fh, raw_obs, raw_comp = 0.0, 0.0, 0.0, 0.0, 0.0
+            reasons.append("No video frame data available (Camera offline)")
         else:
-            status = CameraStatus.OFFLINE
+            # 1. Blur Analysis
+            b_score, b_raw, b_reason = self.blur_analyzer.analyze(image_np)
+            if b_reason:
+                reasons.append(b_reason)
+
+            # 2. Brightness Analysis
+            br_score, br_raw, br_reason = self.brightness_analyzer.analyze(image_np)
+            if br_reason:
+                reasons.append(br_reason)
+
+            # 3. Frame Health Analysis
+            fh_score, fh_reason = self.frame_analyzer.analyze(camera_id, frame_id, timestamp)
+            if fh_reason:
+                reasons.append(fh_reason)
+
+            # 4. Obstruction Analysis
+            obs_score, obs_reason = self.obstruction_analyzer.analyze(image_np)
+            if obs_reason:
+                reasons.append(obs_reason)
+
+            # Calculate raw composite weighted reliability score
+            raw_comp = (
+                (b_score * self.w_blur) +
+                (br_score * self.w_brightness) +
+                (fh_score * self.w_frame) +
+                (obs_score * self.w_obstruction)
+            )
+            raw_b, raw_br, raw_fh, raw_obs = b_score, br_score, fh_score, obs_score
+
+        # Determine raw status directly for this frame
+        if raw_comp >= settings.RELIABILITY_GOOD_THRESHOLD:
+            raw_status = CameraStatus.GOOD
+        elif raw_comp >= settings.RELIABILITY_DEGRADED_THRESHOLD:
+            raw_status = CameraStatus.DEGRADED
+        elif raw_comp >= settings.RELIABILITY_POOR_THRESHOLD:
+            raw_status = CameraStatus.POOR
+        else:
+            raw_status = CameraStatus.OFFLINE
+
+        # Initialize rolling history for camera if absent
+        if camera_id not in self.history:
+            self.history[camera_id] = {
+                "blur": [], "brightness": [], "frame": [], "obstruction": [], "composite": []
+            }
+            self.status_state[camera_id] = {
+                "confirmed_status": raw_status,
+                "candidate_status": raw_status,
+                "candidate_count": 0
+            }
+
+        cam_hist = self.history[camera_id]
+        cam_hist["blur"].append(raw_b)
+        cam_hist["brightness"].append(raw_br)
+        cam_hist["frame"].append(raw_fh)
+        cam_hist["obstruction"].append(raw_obs)
+        cam_hist["composite"].append(raw_comp)
+
+        # Trim to window size
+        for k in cam_hist:
+            if len(cam_hist[k]) > self.window_size:
+                cam_hist[k].pop(0)
+
+        # Compute rolling window averages
+        roll_b = round(float(np.mean(cam_hist["blur"])), 1)
+        roll_br = round(float(np.mean(cam_hist["brightness"])), 1)
+        roll_fh = round(float(np.mean(cam_hist["frame"])), 1)
+        roll_obs = round(float(np.mean(cam_hist["obstruction"])), 1)
+        roll_composite = round(float(np.mean(cam_hist["composite"])), 1)
+
+        # Determine candidate status from rolling composite
+        if roll_composite >= settings.RELIABILITY_GOOD_THRESHOLD:
+            cand_status = CameraStatus.GOOD
+        elif roll_composite >= settings.RELIABILITY_DEGRADED_THRESHOLD:
+            cand_status = CameraStatus.DEGRADED
+        elif roll_composite >= settings.RELIABILITY_POOR_THRESHOLD:
+            cand_status = CameraStatus.POOR
+        else:
+            cand_status = CameraStatus.OFFLINE
+
+        st_data = self.status_state[camera_id]
+
+        # For initial frames (history length <= 3), accept status immediately without hysteresis delay
+        if len(cam_hist["composite"]) <= 3:
+            st_data["confirmed_status"] = cand_status
+            st_data["candidate_status"] = cand_status
+            st_data["candidate_count"] = 0
+        else:
+            if cand_status == st_data["confirmed_status"]:
+                st_data["candidate_status"] = cand_status
+                st_data["candidate_count"] = 0
+            else:
+                if cand_status == st_data["candidate_status"]:
+                    st_data["candidate_count"] += 1
+                else:
+                    st_data["candidate_status"] = cand_status
+                    st_data["candidate_count"] = 1
+
+                # Transition confirmed if candidate count reaches threshold (or immediately if OFFLINE)
+                required = 2 if cand_status in [CameraStatus.OFFLINE, CameraStatus.POOR] else self.hysteresis_frames
+                if st_data["candidate_count"] >= required:
+                    st_data["confirmed_status"] = cand_status
+                    st_data["candidate_count"] = 0
+
+        final_status = st_data["confirmed_status"]
 
         return ReliabilityScore(
             camera_id=camera_id,
             timestamp=timestamp,
-            blur_score=b_score,
-            brightness_score=br_score,
-            frame_health_score=fh_score,
-            obstruction_score=obs_score,
-            composite_reliability_score=composite,
-            status=status,
+            blur_score=roll_b,
+            brightness_score=roll_br,
+            frame_health_score=roll_fh,
+            obstruction_score=roll_obs,
+            composite_reliability_score=roll_composite,
+            status=final_status,
             reasons=reasons
         )

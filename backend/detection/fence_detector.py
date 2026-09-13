@@ -30,7 +30,7 @@ from typing import List, Optional
 import cv2
 import numpy as np
 
-from backend.interfaces import Detection
+from backend.interfaces import Detection, DetectionSource
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +224,8 @@ class FenceDetector:
                 bbox=[float(fx1), float(fy1), float(fx2), float(fy2)],
                 camera_id=camera_id,
                 timestamp=timestamp,
-                frame_id=frame_id
+                frame_id=frame_id,
+                source=DetectionSource.INFRASTRUCTURE_ANALYSIS
             )]
 
         except Exception as exc:

@@ -49,18 +49,18 @@ class AlertManager:
         last_time = self.alert_cooldowns.get(cooldown_key, 0.0)
 
         if (context_event.timestamp - last_time) < settings.LOITERING_COOLDOWN_SECONDS:
-            # Duplicate alert in cooldown — update existing active alert if present
+            # Duplicate alert in cooldown — update existing active alert in-place silently
             for alert in self.active_alerts.values():
                 if alert.camera_id == context_event.camera_id and alert.track_id == context_event.track_id:
                     alert.why_reasons = list(set(alert.why_reasons + why_reasons))
                     alert.event_priority_score = max(alert.event_priority_score, p_score)
-                    return alert
+                    return None  # Do not return duplicate alert object every frame
+            return None
 
         # Evaluate Actionability independently
         actionability, rec_text = self.actionability_matrix.evaluate(
             priority=priority,
-            reliability_status=reliability_score.status,
-            camera_broken=getattr(context_event, "camera_broken", False)
+            reliability_status=reliability_score.status
         )
 
         alert_id = f"ALT-{uuid.uuid4().hex[:8].upper()}"

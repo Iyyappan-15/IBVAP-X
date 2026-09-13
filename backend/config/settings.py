@@ -34,7 +34,11 @@ class Settings(BaseSettings):
     # Object Detection (YOLO)
     YOLO_MODEL_PATH: str = "data/models/yolov8n.pt"
     YOLO_CONFIDENCE_THRESHOLD: float = 0.30
+    YOLO_IOU_THRESHOLD: float = 0.45
+    YOLO_IMAGE_SIZE: int = 640
     YOLO_DETECT_CLASSES: str = "person,car,motorcycle,bus,truck"
+    CUSTOM_MODEL_PATH: str = "data/models/ibvapx_custom.pt"
+    CUSTOM_CLASSES: str = "fence,stone"
 
     # Object Tracking
     TRACK_EVICTION_FRAMES: int = 30
@@ -47,7 +51,7 @@ class Settings(BaseSettings):
     LOITERING_COOLDOWN_SECONDS: int = 60
     DIRECTION_MIN_FRAMES: int = 10
 
-    # Camera Reliability Thresholds & Weights
+    # Camera Reliability Thresholds, Rolling Window & Hysteresis
     BLUR_THRESHOLD: float = 50.0
     BRIGHTNESS_MIN: float = 40.0
     BRIGHTNESS_MAX: float = 220.0
@@ -56,6 +60,9 @@ class Settings(BaseSettings):
     RELIABILITY_WEIGHT_BRIGHTNESS: float = 0.25
     RELIABILITY_WEIGHT_FRAME: float = 0.25
     RELIABILITY_WEIGHT_OBSTRUCTION: float = 0.15
+
+    RELIABILITY_WINDOW_FRAMES: int = 15
+    RELIABILITY_HYSTERESIS_FRAMES: int = 5
 
     RELIABILITY_GOOD_THRESHOLD: float = 80.0
     RELIABILITY_DEGRADED_THRESHOLD: float = 50.0

@@ -49,6 +49,11 @@ class AnomalyStatus(str, Enum):
     NORMAL = "NORMAL"
     ANOMALOUS = "ANOMALOUS"
 
+class DetectionSource(str, Enum):
+    YOLO = "YOLO"
+    INFRASTRUCTURE_ANALYSIS = "INFRASTRUCTURE_ANALYSIS"
+    SCENE_ANALYSIS = "SCENE_ANALYSIS"
+
 # Frame Schema
 class Frame(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -69,6 +74,7 @@ class Detection(BaseModel):
     camera_id: str
     timestamp: float
     frame_id: int
+    source: DetectionSource = DetectionSource.YOLO
 
 # Track Schema
 class Track(BaseModel):
@@ -189,3 +195,18 @@ class CoverageResult(BaseModel):
     coverage_tier: str  # "2+ modeled camera FOVs" | "1 modeled camera FOV" | "0 modeled camera FOVs"
     confidence: str  # HIGH | MEDIUM | LOW
     is_blindspot: bool = False
+
+# Analysis Frame Result Data Contract (Pipeline to Frontend/API)
+class AnalysisFrameResult(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    frame_id: int
+    timestamp: float
+    camera_id: str
+    current_detections: List[Detection] = Field(default_factory=list)
+    active_tracks: List[Track] = Field(default_factory=list)
+    context_events: List[ContextEvent] = Field(default_factory=list)
+    reliability_score: ReliabilityScore
+    new_alerts: List[AlertOutput] = Field(default_factory=list)
+    all_active_alerts: List[AlertOutput] = Field(default_factory=list)
+    unsupported_classes: List[str] = Field(default_factory=list)

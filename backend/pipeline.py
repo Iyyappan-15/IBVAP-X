@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Tuple
 import cv2
 import numpy as np
 
-from backend.interfaces import Frame, AlertOutput, EventPriority
+from backend.interfaces import Frame, AlertOutput, EventPriority, AnalysisFrameResult, CameraStatus
 from backend.detection.video_stream import VideoSource, FileVideoSource
 from backend.detection.detector import ObjectDetector
 from backend.detection.tracker import ObjectTracker
@@ -41,6 +41,13 @@ class IBVAPXPipeline:
         self.last_tracks = []
         self.last_context_events = []
         self.last_alerts = []
+        self.last_frame_result: Optional[AnalysisFrameResult] = None
+
+    def get_model_info(self) -> dict:
+        """Exposes model diagnostic transparency metadata."""
+        if hasattr(self.detector, "get_model_info"):
+            return self.detector.get_model_info()
+        return {}
 
     def process_frame(
         self,
@@ -51,6 +58,7 @@ class IBVAPXPipeline:
         """
         Executes single-frame intelligence pipeline.
         Returns Tuple[annotated_image_np, list_of_new_alerts].
+        Backwards-compatible signature, updates self.last_frame_result.
         """
         # Apply programmatic degradation if demo mode active
         if self.enable_demo_degradation:
@@ -59,7 +67,7 @@ class IBVAPXPipeline:
         # Buffer frame in pre-event memory ring buffer
         self.ring_buffer.add_frame(frame_obj, image_np)
 
-        # 1. PARALLEL STREAM A: Camera Reliability Engine
+        # 1. PARALLEL STREAM A: Camera Reliability Engine (Rolling window + Hysteresis)
         rel_score = self.reliability_engine.calculate_reliability(
             camera_id=frame_obj.camera_id,
             frame_id=frame_obj.frame_id,
@@ -68,7 +76,7 @@ class IBVAPXPipeline:
         )
         self.last_reliability = rel_score
 
-        # 2. Object Detection (with Sub-Box Containment Suppression)
+        # 2. Object Detection (YOLO + clean detections)
         detections = self.detector.detect(frame_obj, image_np=image_np)
         self.last_detections = detections
 
@@ -127,23 +135,33 @@ class IBVAPXPipeline:
         self.last_context_events = ctx_events
         self.last_alerts = new_alerts
 
+        # Formulate structured AnalysisFrameResult for data contract
+        all_active = list(self.alert_manager.active_alerts.values())
+        unsupported = getattr(self.detector, "unsupported_classes", ["fence", "stone"])
+        self.last_frame_result = AnalysisFrameResult(
+            frame_id=frame_obj.frame_id,
+            timestamp=frame_obj.timestamp,
+            camera_id=frame_obj.camera_id,
+            current_detections=detections,
+            active_tracks=tracks,
+            context_events=ctx_events,
+            reliability_score=rel_score,
+            new_alerts=new_alerts,
+            all_active_alerts=all_active,
+            unsupported_classes=unsupported
+        )
+
         # Draw visual tracking overlay
         annotated = ObjectTracker.draw_tracks_overlay(image_np, tracks)
 
-        # Draw scene-level condition banners (fog, camera broken) on top
+        # Draw scene-level condition banners (fog, camera broken/poor) on top
         adverse_weather_any = any(getattr(e, "adverse_weather", False) for e in ctx_events)
-        camera_broken_any = any(getattr(e, "camera_broken", False) for e in ctx_events)
-        # If no tracks, still check raw reliability for camera-broken
-        if not ctx_events and self.last_reliability:
-            rel = self.last_reliability
-            if rel.blur_score < 15.0 or rel.obstruction_score < 20.0 or rel.composite_reliability_score < 15.0:
-                camera_broken_any = True
+        camera_offline_or_poor = rel_score.status in [CameraStatus.POOR, CameraStatus.OFFLINE]
 
         annotated = ObjectTracker.draw_scene_overlay(
             annotated,
             adverse_weather=adverse_weather_any,
-            camera_broken=camera_broken_any
+            camera_broken=camera_offline_or_poor
         )
 
         return annotated, new_alerts
-
