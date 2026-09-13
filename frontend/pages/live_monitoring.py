@@ -96,12 +96,20 @@ st.sidebar.title("🛡️ IBVAP-X Sentinel")
 st.sidebar.caption("Reliability-Aware Border Video Intelligence")
 st.sidebar.markdown("---")
 
+def safe_set_setting(obj, name, val):
+    try:
+        setattr(obj, name, val)
+    except Exception:
+        try:
+            object.__setattr__(obj, name, val)
+        except Exception:
+            pass
+
 st.sidebar.header("📹 Video Source")
 input_type = st.sidebar.radio(
     "Source Channel",
     [
         "📤 Upload Video File",
-        "🎬 Demo Scenario Video",
         "🌍 Public CCTV Feeds",
         "📷 Webcam Device",
         "🌐 Custom RTSP Stream",
@@ -198,13 +206,13 @@ keyframe_interval_val = st.sidebar.slider(
 
 # Apply settings updates dynamically
 if "Hybrid" in detection_mode_selected:
-    settings.HYBRID_DETECTION_MODE = "hybrid"
+    safe_set_setting(settings, "HYBRID_DETECTION_MODE", "hybrid")
 elif "Standard" in detection_mode_selected:
-    settings.HYBRID_DETECTION_MODE = "standard"
+    safe_set_setting(settings, "HYBRID_DETECTION_MODE", "standard")
 else:
-    settings.HYBRID_DETECTION_MODE = "open_vocabulary"
+    safe_set_setting(settings, "HYBRID_DETECTION_MODE", "open_vocabulary")
 
-settings.SMART_DETECTION_INTERVAL_SECONDS = keyframe_interval_val
+safe_set_setting(settings, "SMART_DETECTION_INTERVAL_SECONDS", keyframe_interval_val)
 
 # Check open-vocab model weight availability
 ov_weights_path = settings.OPEN_VOCAB_MODEL_PATH
@@ -307,45 +315,7 @@ if "Upload" in input_type:
     else:
         st.info("Awaiting video file upload. Use the selector above or choose a Public CCTV Feed.")
 
-# ── B. DEMO SCENARIO VIDEO ──
-elif "Demo Scenario" in input_type:
-    st.markdown("### 🎬 Offline Demo Scenario Videos")
-    st.caption("Pre-configured surveillance scenario recordings for evaluation and benchmarking.")
-
-    demo_sources = []
-    if os.path.exists(settings.DEMO_SOURCES_CONFIG_PATH):
-        try:
-            with open(settings.DEMO_SOURCES_CONFIG_PATH, "r", encoding="utf-8") as f:
-                demo_sources = json.load(f).get("demo_sources", [])
-        except Exception as e:
-            logger.warning(f"Could not load demo sources config: {e}")
-
-    if not demo_sources:
-        demo_sources = [
-            {"source_id": "DEMO-01", "name": "Scenario 1: Real-World Night Perimeter Surveillance", "file_path": "data/demo/cctv_night_patrol.mp4", "description": "Night infrared optical perimeter feed."},
-            {"source_id": "DEMO-02", "name": "Scenario 2: Normal Patrol Activity", "file_path": "data/demo/test_normal.mp4", "description": "Routine day patrol along boundary line."},
-            {"source_id": "DEMO-03", "name": "Scenario 3: Restricted Zone Entry", "file_path": "data/demo/test_zone.mp4", "description": "Restricted buffer zone approach."},
-            {"source_id": "DEMO-04", "name": "Scenario 4: Degraded Camera Feed", "file_path": "data/demo/test_degraded.mp4", "description": "Optical blur and underexposure test."}
-        ]
-
-    demo_opts = {f"{d['name']} ({d['source_id']})": d for d in demo_sources}
-    selected_demo_key = st.selectbox("Select Scenario Video", list(demo_opts.keys()), index=0)
-    demo_item = demo_opts[selected_demo_key]
-
-    selected_file_path = demo_item.get("file_path", "data/demo/cctv_night_patrol.mp4")
-    camera_id = demo_item.get("source_id", "CAM-DEMO-01")
-    source_label = f"DEMO SCENARIO ({demo_item.get('source_id')})"
-
-    st.markdown(
-        f'<div style="background: #0f172a; border: 1px solid #1e3a8a; border-left: 4px solid #38bdf8; border-radius: 6px; padding: 12px 16px; margin: 10px 0;">'
-        f'<div style="font-weight: 700; color: #f8fafc; font-size: 14px; margin-bottom: 4px;">🎬 {demo_item.get("name")}</div>'
-        f'<div style="font-size: 12px; font-family: monospace; color: #94a3b8;">Asset Path: <code>{selected_file_path}</code></div>'
-        f'<div style="font-size: 11px; color: #64748b; margin-top: 4px;">ℹ️ {demo_item.get("description")}</div>'
-        f'</div>',
-        unsafe_allow_html=True
-    )
-
-# ── C. PUBLIC CCTV FEEDS ──
+# ── B. PUBLIC CCTV FEEDS ──
 elif "Public CCTV" in input_type:
     st.markdown("### 🌍 Public Camera Streams & Feeds")
     st.info(
@@ -468,8 +438,6 @@ if start_clicked and selected_file_path:
     try:
         if "Public CCTV" in input_type and selected_public_cam_dict:
             source = PublicCameraSource(selected_public_cam_dict)
-        elif "Demo Scenario" in input_type:
-            source = DemoVideoSource(file_path=selected_file_path, camera_id=camera_id, demo_name=source_label)
         elif "RTSP" in input_type:
             source = RTSPVideoSource(rtsp_url=selected_file_path, camera_id=camera_id)
         elif "Webcam" in input_type:
@@ -764,8 +732,6 @@ if start_clicked and selected_file_path:
         v_filename = "Live Video Stream"
         if "Upload" in input_type and st.session_state.get("ibvapx_validation_result"):
             v_filename = st.session_state["ibvapx_validation_result"].filename
-        elif "Demo" in input_type:
-            v_filename = os.path.basename(selected_file_path) if selected_file_path else "cctv_night_patrol.mp4"
         elif "Public CCTV" in input_type:
             v_filename = os.path.basename(selected_file_path) if selected_file_path else "cctv_feed.mp4"
         elif "Webcam" in input_type:
