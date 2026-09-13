@@ -113,19 +113,19 @@ st.sidebar.markdown("---")
 playback_speed_preset = st.sidebar.radio(
     "Playback Speed Control",
     [
-        "🐢 Slow Step-by-Step (1 FPS — 1s / frame)",
-        "🚶 Measured Inspection (3 FPS — 0.33s / frame)",
-        "🏃 Standard Video Speed (10 FPS)",
+        "🐢 Step-by-Step (1 FPS — 1.0s / frame)",
+        "🚶 Comfortable Pace (4 FPS — 0.25s / frame)",
+        "🏃 Video Speed (10 FPS — 0.1s / frame)",
         "⚡ Fast Preview (20 FPS)",
     ],
-    index=0,
-    help="Select slow step-by-step playback for detailed frame-by-frame operator inspection as requested.",
+    index=1,
+    help="Select playback speed for comfortable operator inspection. Default is 4 FPS.",
 )
 
 if "1 FPS" in playback_speed_preset:
     preset_fps_val = 1
-elif "3 FPS" in playback_speed_preset:
-    preset_fps_val = 3
+elif "4 FPS" in playback_speed_preset:
+    preset_fps_val = 4
 elif "10 FPS" in playback_speed_preset:
     preset_fps_val = 10
 else:
@@ -629,7 +629,8 @@ if start_clicked and selected_file_path:
                 live_fps = processed_count / elapsed if elapsed > 0 else 0.0
                 stat_frames.metric("Frames", f"{frame_idx}/{total_frames}")
                 stat_fps.metric("Processing FPS", f"{live_fps:.1f}")
-                stat_objs.metric("Detections", len(current_dets))
+                active_det_count = len(current_dets) if len(current_dets) > 0 else len(active_t)
+                stat_objs.metric("Detections", active_det_count)
                 stat_tracks.metric("Active Tracks", len(active_t))
                 unique_alert_tracks = len(set(a.get("track_id") for a in all_alerts_collected))
                 stat_alerts.metric("Alert Incidents", unique_alert_tracks)

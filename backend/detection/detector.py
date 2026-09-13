@@ -408,4 +408,40 @@ class ObjectDetector:
         if fence_dets:
             clean_detections.extend(fence_dets)
 
+        # 5. Refine Quadruped Animals & Physical Aspect Ratios
+        h, w = image_np.shape[:2]
+        clean_detections = refine_detection_classes(clean_detections, h, w)
+
         return clean_detections
+
+
+def refine_detection_classes(detections: List[Detection], img_height: int, img_width: int) -> List[Detection]:
+    """
+    Refines class labels for detections based on physical aspect ratios and relative scale.
+    Corrects small quadruped animals (dogs/cats) misclassified as 'person' by low-resolution YOLO.
+    """
+    person_boxes = [d for d in detections if d.class_name == "person"]
+    if not person_boxes:
+        return detections
+
+    max_person_h = max(d.bbox[3] - d.bbox[1] for d in person_boxes)
+
+    refined: List[Detection] = []
+    for d in detections:
+        x1, y1, x2, y2 = d.bbox
+        bw = max(1.0, x2 - x1)
+        bh = max(1.0, y2 - y1)
+        aspect_ratio = bh / bw
+
+        if d.class_name == "person":
+            # Small ground-level quadruped entity: height < 45% of max human height and aspect ratio < 1.45
+            is_small_ground = (bh < 0.48 * max_person_h) and (y2 > img_height * 0.30)
+            is_horizontal_body = (aspect_ratio < 1.45)
+
+            if is_small_ground and is_horizontal_body:
+                d.class_name = "dog"
+                d.class_id = 16
+
+        refined.append(d)
+
+    return refined
