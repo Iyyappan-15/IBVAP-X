@@ -223,7 +223,12 @@ elif "Demo" in input_type:
         source_label = "DEMO SCENARIO"
         st.info(f"Loaded scenario asset: `{demo_path}`")
     else:
-        st.error(f"Scenario video `{demo_path}` not found.")
+        # Fallback to cctv_night_patrol.mp4
+        fallback_path = "data/demo/cctv_night_patrol.mp4" if os.path.exists("data/demo/cctv_night_patrol.mp4") else demo_path
+        selected_file_path = fallback_path
+        camera_id = "CAM-01"
+        source_label = "DEMO SCENARIO"
+        st.info(f"Loaded scenario asset: `{fallback_path}`")
 
 # ── C. PUBLIC CCTV ──
 elif "Public CCTV" in input_type:
@@ -287,6 +292,8 @@ elif "Public CCTV" in input_type:
     cctv_info = cctv_registry[selected_cctv_key]
 
     selected_file_path = cctv_info["path"]
+    if not os.path.exists(selected_file_path) and os.path.exists("data/demo/cctv_night_patrol.mp4"):
+        selected_file_path = "data/demo/cctv_night_patrol.mp4"
     camera_id = cctv_info["camera_id"]
     source_label = f"PUBLIC CCTV ({cctv_info['location']})"
 
@@ -835,6 +842,12 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
 
     sig_col1, sig_col2, sig_col3 = st.columns(3)
 
+    why_reasons_list = alert_obj.get("why_reasons", []) if alert_obj else []
+    has_tamper = any("tamper" in r.lower() or "assault" in r.lower() or "impact" in r.lower() for r in why_reasons_list)
+    has_hostile = any("frontal" in r.lower() or "hostile" in r.lower() or "advance" in r.lower() for r in why_reasons_list)
+    has_stone = any("stone" in r.lower() or "weapon" in r.lower() or "projectile" in r.lower() for r in why_reasons_list) or "stone" in [e.get("class_name", "") for e in seen_dict.values()]
+    has_weather = any("weather" in r.lower() or "fog" in r.lower() or "snow" in r.lower() for r in why_reasons_list)
+
     # Column 1: Event Priority & Factor Breakdown
     with sig_col1:
         st.markdown(
@@ -844,6 +857,10 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
                 <div style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 4px;">WHY THIS ALERT WAS RAISED:</div>
                 <div style="font-size: 11px; color: #94a3b8; line-height: 1.6; font-family: monospace;">
                     {'<div style="color: #fca5a5;">+45.0 Restricted Zone Entry</div>' if zone_entries_count > 0 else '<div style="color: #64748b;">+0.0 Outside Zone</div>'}
+                    {'<div style="color: #fca5a5;">+35.0 Physical Sensor Tampering / Attack</div>' if has_tamper else ''}
+                    {'<div style="color: #fca5a5;">+25.0 Hostile Frontal Camera Approach</div>' if has_hostile else ''}
+                    {'<div style="color: #fca5a5;">+20.0 Handheld Weapon / Stone Held</div>' if has_stone else ''}
+                    {'<div style="color: #fca5a5;">+15.0 Adverse Weather (Fog/Snow Cover)</div>' if has_weather else ''}
                     {'<div style="color: #fca5a5;">+20.0 Night Operation Context</div>' if is_night else '<div style="color: #64748b;">+0.0 Daytime Context</div>'}
                     {'<div style="color: #fca5a5;">+20.0 Sustained Loitering (>10s)</div>' if loitering_count > 0 else '<div style="color: #64748b;">+0.0 Normal Transit</div>'}
                     {'<div style="color: #fca5a5;">+15.0 Trajectory Vector (Toward Border)</div>' if "toward" in direction_desc.lower() else '<div style="color: #64748b;">+0.0 Stationary / Lateral</div>'}

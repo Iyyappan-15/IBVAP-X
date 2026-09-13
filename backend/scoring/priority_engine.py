@@ -47,12 +47,32 @@ class PriorityEngine:
             score += 15.0
             reasons.append(f"Trajectory movement vector directed toward border boundary ({context_event.direction.value})")
 
-        # 5. Cross-Camera Confirmation (+15)
+        # 5. Sensor Tampering & Direct Physical Assault (+35)
+        if getattr(context_event, "tampering_detected", False):
+            score += 35.0
+            reasons.append("Physical sensor tampering / camera impact assault detected")
+
+        # 6. Hostile Direct Frontal Approach (+25)
+        if getattr(context_event, "hostile_approach", False):
+            score += 25.0
+            reasons.append("Rapid frontal approach toward perimeter surveillance post")
+
+        # 7. Handheld Object / Weapon / Stone Detected (+20)
+        if getattr(context_event, "holding_object", False):
+            score += 20.0
+            reasons.append("Suspicious handheld projectile / stone / weapon detected in target possession")
+
+        # 8. Adverse Weather Cover (Fog / Low-Visibility Snow) (+15)
+        if getattr(context_event, "adverse_weather", False):
+            score += 15.0
+            reasons.append("Adverse atmospheric cover (Fog / Low-visibility snow conditions)")
+
+        # 9. Cross-Camera Confirmation (+15)
         if cross_camera_confirmed:
             score += 15.0
             reasons.append("Corroborating event confirmed across adjacent camera feed")
 
-        # 6. Secondary Anomaly Signal (+10)
+        # 10. Secondary Anomaly Signal (+10)
         if anomaly_score is not None and anomaly_score >= settings.ANOMALY_SCORE_THRESHOLD:
             score += 10.0
             reasons.append(f"Secondary anomaly engine signal detected (Anomaly Index: {anomaly_score:.2f})")
@@ -119,4 +139,35 @@ class PriorityEngine:
                 "detail": f"Anomaly score: {anomaly_score:.2f}" if anomaly_score is not None else "Normal kinematic motion"
             }
         ]
+
+        # Append active situational threat factors
+        if getattr(context_event, "tampering_detected", False):
+            factors.append({
+                "name": "Physical Sensor Tampering",
+                "points": 35.0,
+                "active": True,
+                "detail": "Direct physical assault / lens impact"
+            })
+        if getattr(context_event, "hostile_approach", False):
+            factors.append({
+                "name": "Hostile Frontal Approach",
+                "points": 25.0,
+                "active": True,
+                "detail": "Direct advance toward camera post"
+            })
+        if getattr(context_event, "holding_object", False):
+            factors.append({
+                "name": "Handheld Weapon / Stone",
+                "points": 20.0,
+                "active": True,
+                "detail": "Suspicious object / projectile in possession"
+            })
+        if getattr(context_event, "adverse_weather", False):
+            factors.append({
+                "name": "Adverse Weather Cover (Fog / Snow)",
+                "points": 15.0,
+                "active": True,
+                "detail": "Fog / low-visibility atmospheric occlusion"
+            })
+
         return factors

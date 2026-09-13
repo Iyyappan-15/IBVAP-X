@@ -87,7 +87,9 @@ class IBVAPXPipeline:
                 track=track,
                 frame_width=image_np.shape[1],
                 frame_height=image_np.shape[0],
-                timestamp=frame_obj.timestamp
+                timestamp=frame_obj.timestamp,
+                image_np=image_np,
+                active_tracks=tracks
             )
             ctx_events.append(ctx_event)
 

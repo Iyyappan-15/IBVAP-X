@@ -95,6 +95,10 @@ class ContextEvent(BaseModel):
     loitering_duration_seconds: float = 0.0
     time_context: TimeContextEnum = TimeContextEnum.DAY
     direction: DirectionEnum = DirectionEnum.UNCERTAIN
+    hostile_approach: bool = False
+    holding_object: bool = False
+    adverse_weather: bool = False
+    tampering_detected: bool = False
 
 # Reliability Score Schema
 class ReliabilityScore(BaseModel):

@@ -2,7 +2,7 @@
 backend/detection/fence_detector.py
 
 High-Precision Physical Perimeter Fence Detector for IBVAP-X.
-Detects security fences, chain-link boundary mesh, and perimeter gates in border CCTV feeds.
+Detects security fences, chain-link boundary mesh, and perimeter gates using structural line cluster analysis.
 """
 import logging
 from typing import List, Tuple, Optional
@@ -15,14 +15,12 @@ logger = logging.getLogger(__name__)
 
 class FenceDetector:
     """
-    Detects physical boundary fences and chain-link perimeters.
-    Maintains a stable, verified bounding box across frames.
+    Detects physical boundary fences and chain-link perimeters via structural line clustering.
+    Only fires when genuine parallel vertical/diagonal fence lattice lines are present.
     """
 
-    def __init__(self, confidence: float = 0.95):
+    def __init__(self, confidence: float = 0.92):
         self.confidence = confidence
-        self.cached_fence_bbox: Optional[List[float]] = None
-        self.cached_frames = 0
 
     def detect_fence(
         self,
@@ -33,58 +31,93 @@ class FenceDetector:
         existing_detections: Optional[List[Detection]] = None
     ) -> List[Detection]:
         """
-        Detects physical perimeter fences and barriers in the frame.
+        Detects physical perimeter fences and barriers based on genuine structural line geometry.
         """
         if image_np is None or image_np.size == 0:
             return []
 
         h, w = image_np.shape[:2]
 
-        # Use cached fence bounding box for 100% temporal consistency across all frames
-        if self.cached_fence_bbox is not None and self.cached_frames < 120:
-            self.cached_frames += 1
-            return [
-                Detection(
-                    class_id=99,
-                    class_name="fence",
-                    confidence=self.confidence,
-                    bbox=self.cached_fence_bbox,
-                    camera_id=camera_id,
-                    timestamp=timestamp,
-                    frame_id=frame_id
-                )
-            ]
-
         try:
             gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
             blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            edges = cv2.Canny(blurred, 35, 120)
+            edges = cv2.Canny(blurred, 50, 150)
 
-            # Analyze the perimeter sector (right 45% of frame) where fences stand
-            x_start = int(w * 0.58)
-            x_end = int(w * 0.98)
-            y_start = int(h * 0.08)
-            y_end = int(h * 0.88)
+            # Detect lines using probabilistic Hough transform
+            lines = cv2.HoughLinesP(
+                edges,
+                rho=1,
+                theta=np.pi / 180,
+                threshold=40,
+                minLineLength=int(h * 0.12),
+                maxLineGap=15
+            )
 
-            roi_edges = edges[y_start:y_end, x_start:x_end]
-            density = np.count_nonzero(roi_edges) / float(roi_edges.size)
+            if lines is None or len(lines) < 6:
+                return []
 
-            # In surveillance footage with chain-link mesh, edge density in the perimeter is > 0.008
-            if density >= 0.008 or np.count_nonzero(roi_edges) > 50:
-                final_bbox = [float(x_start), float(y_start), float(x_end), float(y_end)]
-                self.cached_fence_bbox = final_bbox
-                self.cached_frames = 0
-                return [
-                    Detection(
-                        class_id=99,
-                        class_name="fence",
-                        confidence=self.confidence,
-                        bbox=final_bbox,
-                        camera_id=camera_id,
-                        timestamp=timestamp,
-                        frame_id=frame_id
-                    )
-                ]
+            # Filter for vertical or steep diagonal fence posts / mesh lines
+            fence_points_x: List[int] = []
+            fence_points_y: List[int] = []
+            vertical_line_count = 0
+
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                dx = abs(x2 - x1)
+                dy = abs(y2 - y1)
+                angle = np.arctan2(dy, max(dx, 1)) * 180.0 / np.pi
+
+                # Fence posts / mesh are typically between 45 and 90 degrees
+                if angle >= 45.0:
+                    vertical_line_count += 1
+                    fence_points_x.extend([x1, x2])
+                    fence_points_y.extend([y1, y2])
+
+            # Must have at least 8 structural vertical/lattice lines to confirm a real fence
+            if vertical_line_count >= 8 and len(fence_points_x) >= 16:
+                min_x = max(0, int(np.percentile(fence_points_x, 5)))
+                max_x = min(w, int(np.percentile(fence_points_x, 95)))
+                min_y = max(0, int(np.percentile(fence_points_y, 5)))
+                max_y = min(h, int(np.percentile(fence_points_y, 95)))
+
+                box_w = max_x - min_x
+                box_h = max_y - min_y
+
+                # A valid fence section should have substantial coverage but not cover a person
+                if box_w >= int(w * 0.15) and box_h >= int(h * 0.20):
+                    fence_box = [float(min_x), float(min_y), float(max_x), float(max_y)]
+
+                    # Verify no person is occupying the majority of this box (avoid tagging person as fence)
+                    if existing_detections:
+                        for det in existing_detections:
+                            if det.class_name == "person":
+                                px1, py1, px2, py2 = det.bbox
+                                p_area = max(0.0, px2 - px1) * max(0.0, py2 - py1)
+                                # Intersection with fence box
+                                ix1, iy1 = max(min_x, px1), max(min_y, py1)
+                                ix2, iy2 = min(max_x, px2), min(max_y, py2)
+                                i_area = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+                                if p_area > 0 and (i_area / p_area) > 0.70:
+                                    # Person is inside this region; adjust fence boundary or skip false box
+                                    if px1 > min_x + int(box_w * 0.3):
+                                        max_x = int(px1 - 5)
+                                    elif px2 < max_x - int(box_w * 0.3):
+                                        min_x = int(px2 + 5)
+                                    else:
+                                        return []
+
+                    if max_x > min_x + int(w * 0.10) and max_y > min_y + int(h * 0.15):
+                        return [
+                            Detection(
+                                class_id=99,
+                                class_name="fence",
+                                confidence=self.confidence,
+                                bbox=[float(min_x), float(min_y), float(max_x), float(max_y)],
+                                camera_id=camera_id,
+                                timestamp=timestamp,
+                                frame_id=frame_id
+                            )
+                        ]
 
         except Exception as e:
             logger.warning(f"[FenceDetector] Error: {e}")

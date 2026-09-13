@@ -118,6 +118,17 @@ class ObjectDetector:
 
         self.model.to(self.device)
 
+        # Expanded surveillance classes (including handheld objects, luggage, tools)
+        self.surveillance_classes = {
+            "person", "car", "truck", "bus", "motorcycle", "bicycle",
+            "backpack", "handbag", "suitcase", "sports ball", "bottle",
+            "knife", "baseball bat", "cell phone", "umbrella", "scissors"
+        }
+        if target_classes:
+            self.target_classes = target_classes
+        else:
+            self.target_classes = list(self.surveillance_classes.union(set(settings.detect_classes_list)))
+
         # Map class names to class IDs for configured target classes
         self.target_class_ids = []
         if hasattr(self.model, "names"):
@@ -125,9 +136,92 @@ class ObjectDetector:
                 if cname.lower() in [tc.lower() for tc in self.target_classes]:
                     self.target_class_ids.append(cid)
 
+    def _detect_handheld_objects(
+        self,
+        image_np: np.ndarray,
+        person_detections: List[Detection],
+        camera_id: str,
+        timestamp: float,
+        frame_id: int
+    ) -> List[Detection]:
+        """
+        Detects compact handheld objects (stones, tools, thrown items) in or near the hand regions of detected persons.
+        """
+        if image_np is None or not person_detections:
+            return []
+
+        h, w = image_np.shape[:2]
+        gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
+        handheld_dets: List[Detection] = []
+
+        for p_det in person_detections:
+            px1, py1, px2, py2 = [int(v) for v in p_det.bbox]
+            pw = max(1, px2 - px1)
+            ph = max(1, py2 - py1)
+
+            # Hand regions: left and right lateral torso sectors
+            hand_rois = [
+                # Left hand region
+                (max(0, px1 - int(pw * 0.30)), max(0, py1 + int(ph * 0.35)), min(w, px1 + int(pw * 0.40)), min(h, py1 + int(ph * 0.85))),
+                # Right hand region
+                (max(0, px2 - int(pw * 0.40)), max(0, py1 + int(ph * 0.35)), min(w, px2 + int(pw * 0.30)), min(h, py1 + int(ph * 0.85))),
+            ]
+
+            for rx1, ry1, rx2, ry2 in hand_rois:
+                if rx2 <= rx1 or ry2 <= ry1:
+                    continue
+
+                roi_gray = gray[ry1:ry2, rx1:rx2]
+                if roi_gray.size == 0:
+                    continue
+
+                # Detect salient compact objects using thresholding & contour analysis
+                roi_blur = cv2.GaussianBlur(roi_gray, (5, 5), 0)
+                # Adaptive gradient / Laplacian for high-contrast stone/object texture
+                lap = cv2.Laplacian(roi_blur, cv2.CV_64F)
+                lap_abs = cv2.convertScaleAbs(lap)
+                _, thresh = cv2.threshold(lap_abs, 20, 255, cv2.THRESH_BINARY)
+
+                contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                for cnt in contours:
+                    area = cv2.contourArea(cnt)
+                    # Stone/handheld object size limits
+                    if 120 <= area <= int(pw * ph * 0.18):
+                        cx, cy, cw, ch = cv2.boundingRect(cnt)
+                        aspect = float(cw) / max(1, float(ch))
+                        if 0.4 <= aspect <= 2.5 and cw >= 14 and ch >= 14:
+                            ox1 = float(rx1 + cx)
+                            oy1 = float(ry1 + cy)
+                            ox2 = float(rx1 + cx + cw)
+                            oy2 = float(ry1 + cy + ch)
+
+                            # Ensure it's not a duplicate
+                            is_dup = False
+                            for ed in handheld_dets:
+                                ex1, ey1, ex2, ey2 = ed.bbox
+                                if abs(ox1 - ex1) < 20 and abs(oy1 - ey1) < 20:
+                                    is_dup = True
+                                    break
+
+                            if not is_dup:
+                                handheld_dets.append(
+                                    Detection(
+                                        class_id=88,
+                                        class_name="stone",
+                                        confidence=0.88,
+                                        bbox=[round(ox1, 2), round(oy1, 2), round(ox2, 2), round(oy2, 2)],
+                                        camera_id=camera_id,
+                                        timestamp=timestamp,
+                                        frame_id=frame_id
+                                    )
+                                )
+                                break  # One primary handheld object per hand
+
+        return handheld_dets
+
     def detect(self, frame_obj: Frame, image_np: np.ndarray = None) -> List[Detection]:
         """
-        Runs object detection + fence detection on a Frame or image.
+        Runs object detection + handheld object detection + fence detection on a Frame or image.
         Returns clean Detection objects without nested duplicate boxes.
         """
         if image_np is None:
@@ -178,6 +272,10 @@ class ObjectDetector:
                 if conf < self.confidence_threshold:
                     continue
 
+                # Map sports ball / bottle / phone near hand to stone/object if relevant
+                if cls_name.lower() in ["sports ball", "frisbee"]:
+                    cls_name = "stone"
+
                 det = Detection(
                     class_id=cls_id,
                     class_name=cls_name,
@@ -192,7 +290,19 @@ class ObjectDetector:
         # 2. Apply Sub-Box Containment Suppression
         clean_detections = suppress_nested_subboxes(raw_detections, containment_threshold=0.60)
 
-        # 3. Detect Perimeter Fence & Boundary Structures (Strict rejection of road asphalt & vehicles)
+        # 3. Detect Handheld Objects (e.g. stones, tools, weapons)
+        person_dets = [d for d in clean_detections if d.class_name == "person"]
+        handheld_dets = self._detect_handheld_objects(
+            image_np,
+            person_dets,
+            camera_id=frame_obj.camera_id,
+            timestamp=frame_obj.timestamp,
+            frame_id=frame_obj.frame_id
+        )
+        if handheld_dets:
+            clean_detections.extend(handheld_dets)
+
+        # 4. Detect Perimeter Fence & Boundary Structures
         fence_dets = self.fence_detector.detect_fence(
             image_np,
             camera_id=frame_obj.camera_id,
@@ -202,6 +312,5 @@ class ObjectDetector:
         )
         if fence_dets:
             clean_detections.extend(fence_dets)
-
 
         return clean_detections
