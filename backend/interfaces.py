@@ -53,6 +53,8 @@ class DetectionSource(str, Enum):
     YOLO = "YOLO"
     INFRASTRUCTURE_ANALYSIS = "INFRASTRUCTURE_ANALYSIS"
     SCENE_ANALYSIS = "SCENE_ANALYSIS"
+    OPEN_VOCAB_DISCOVERY = "OPEN_VOCAB_DISCOVERY"
+    OPEN_VOCAB_REFINEMENT = "OPEN_VOCAB_REFINEMENT"
 
 # Frame Schema
 class Frame(BaseModel):
@@ -88,6 +90,8 @@ class Track(BaseModel):
     direction_vector: Tuple[float, float] = (0.0, 0.0)
     direction_enum: DirectionEnum = DirectionEnum.UNCERTAIN
     zone_history: List[str] = Field(default_factory=list)
+    label_stability: str = "HIGH"  # HIGH | MEDIUM | LOW
+    source: DetectionSource = DetectionSource.YOLO
 
 # Context Event Schema
 class ContextEvent(BaseModel):

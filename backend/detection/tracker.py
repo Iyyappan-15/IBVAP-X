@@ -16,7 +16,7 @@ import numpy as np
 import cv2
 
 from backend.config import settings
-from backend.interfaces import Track, Detection, DirectionEnum
+from backend.interfaces import Track, Detection, DirectionEnum, DetectionSource
 
 logger = logging.getLogger(__name__)
 
@@ -226,13 +226,20 @@ class ObjectTracker:
                             "direction_vector": (0.0, 0.0),
                             "zone_history": [],
                             "stale_count": 0,
+                            "class_history": [(cname, 0.85)],
+                            "label_stability": "HIGH",
+                            "source": DetectionSource.YOLO
                         }
                     else:
                         tdata = self.active_tracks[tid]
                         tdata["bbox"] = box
-                        tdata["class_name"] = cname
                         tdata["last_seen"] = timestamp
                         tdata["stale_count"] = 0
+                        # Record class observation for label stabilization
+                        tdata["class_history"].append((cname, 0.85))
+                        if len(tdata["class_history"]) > 10:
+                            tdata["class_history"].pop(0)
+                        self._update_track_label_stability(tdata)
 
                         traj = tdata["trajectory"]
                         if traj:
@@ -267,6 +274,85 @@ class ObjectTracker:
             self.use_fallback = True
             return self.fallback_tracker.update(detections, timestamp)
 
+    def associate_open_vocab_detections(self, open_vocab_dets: List[Detection], timestamp: float) -> List[Track]:
+        """
+        Associates open-vocabulary discovery and refinement detections with active tracks,
+        or creates new discovery candidate tracks for unsupported objects (fence, stone, gate).
+        """
+        if not open_vocab_dets:
+            return self._build_track_outputs()
+
+        next_id = max(self.active_tracks.keys(), default=0) + 100
+
+        for det in open_vocab_dets:
+            best_track_id = None
+            best_iou = 0.0
+
+            for tid, tdata in self.active_tracks.items():
+                iou = calculate_iou(tdata["bbox"], det.bbox)
+                if iou > best_iou and iou >= 0.25:
+                    best_iou = iou
+                    best_track_id = tid
+
+            if best_track_id is not None:
+                # Associated with existing track
+                tdata = self.active_tracks[best_track_id]
+                # High weight for open-vocab refinement / discovery
+                weight = 1.5 if det.source == DetectionSource.OPEN_VOCAB_REFINEMENT else 1.2
+                tdata["class_history"].append((det.class_name, det.confidence * weight))
+                if len(tdata["class_history"]) > 10:
+                    tdata["class_history"].pop(0)
+                tdata["source"] = det.source
+                self._update_track_label_stability(tdata)
+            elif det.source == DetectionSource.OPEN_VOCAB_DISCOVERY:
+                # Instantiate new open-vocab discovery candidate track
+                cx = (det.bbox[0] + det.bbox[2]) / 2.0
+                cy = (det.bbox[1] + det.bbox[3]) / 2.0
+                self.active_tracks[next_id] = {
+                    "track_id": next_id,
+                    "class_name": det.class_name,
+                    "bbox": det.bbox,
+                    "trajectory": [(cx, cy)],
+                    "start_time": timestamp,
+                    "last_seen": timestamp,
+                    "estimated_speed": 0.0,
+                    "direction_vector": (0.0, 0.0),
+                    "zone_history": [],
+                    "stale_count": 0,
+                    "class_history": [(det.class_name, det.confidence * 1.5)],
+                    "label_stability": "HIGH",
+                    "source": DetectionSource.OPEN_VOCAB_DISCOVERY
+                }
+                next_id += 1
+
+        return self._build_track_outputs()
+
+    def _update_track_label_stability(self, tdata: Dict):
+        """Calculates rolling confidence-weighted class label and stability score."""
+        class_hist = tdata.get("class_history", [])
+        if not class_hist:
+            return
+
+        scores: Dict[str, float] = {}
+        total_weight = 0.0
+        for cname, conf in class_hist:
+            scores[cname] = scores.get(cname, 0.0) + conf
+            total_weight += conf
+
+        if total_weight <= 0.0:
+            return
+
+        top_class = max(scores.items(), key=lambda x: x[1])
+        top_weight_ratio = top_class[1] / total_weight
+
+        tdata["class_name"] = top_class[0]
+        if top_weight_ratio >= 0.70:
+            tdata["label_stability"] = "HIGH"
+        elif top_weight_ratio >= 0.40:
+            tdata["label_stability"] = "MEDIUM"
+        else:
+            tdata["label_stability"] = "LOW"
+
     def _build_track_outputs(self) -> List[Track]:
         output: List[Track] = []
         for t_id, data in self.active_tracks.items():
@@ -282,6 +368,8 @@ class ObjectTracker:
                     direction_vector=data["direction_vector"],
                     direction_enum=DirectionEnum.UNCERTAIN,
                     zone_history=data["zone_history"],
+                    label_stability=data.get("label_stability", "HIGH"),
+                    source=data.get("source", DetectionSource.YOLO)
                 )
             )
         return output

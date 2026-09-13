@@ -35,6 +35,11 @@ class IBVAPXPipeline:
         self.evidence_capturer = EvidenceCapturer()
         self.ring_buffer = PreEventRingBuffer(max_seconds=10, fps=10.0)
 
+        # Open-Vocabulary Semantic Discovery & Refinement Engine
+        from backend.detection.open_vocab_refiner import OpenVocabEngine
+        self.open_vocab_engine = OpenVocabEngine()
+        self.last_keyframe_time: float = 0.0
+
         self.enable_demo_degradation = enable_demo_degradation
         self.last_reliability = None
         self.last_detections = []
@@ -45,9 +50,12 @@ class IBVAPXPipeline:
 
     def get_model_info(self) -> dict:
         """Exposes model diagnostic transparency metadata."""
+        info = {}
         if hasattr(self.detector, "get_model_info"):
-            return self.detector.get_model_info()
-        return {}
+            info = self.detector.get_model_info()
+        if hasattr(self, "open_vocab_engine"):
+            info["open_vocab"] = self.open_vocab_engine.get_info()
+        return info
 
     def process_frame(
         self,
@@ -82,6 +90,35 @@ class IBVAPXPipeline:
 
         # 3. Multi-Object Tracking (ByteTrack / IoU Fallback)
         tracks = self.tracker.update(detections, timestamp=frame_obj.timestamp)
+
+        # 3b. Dual-Path Open-Vocabulary Semantic Discovery & Refinement
+        open_vocab_dets = []
+        if getattr(self, "open_vocab_engine", None) and self.open_vocab_engine.is_available:
+            # Operation 1: Track Crop Refinement on active tracks
+            refined = self.open_vocab_engine.refine_track_crops(
+                image_np, tracks,
+                camera_id=frame_obj.camera_id,
+                timestamp=frame_obj.timestamp,
+                frame_id=frame_obj.frame_id
+            )
+            if refined:
+                open_vocab_dets.extend(refined)
+
+            # Operation 2: Full-Frame Keyframe Discovery on interval
+            if (frame_obj.timestamp - self.last_keyframe_time >= settings.SMART_DETECTION_INTERVAL_SECONDS) or (self.last_keyframe_time == 0.0):
+                discovered = self.open_vocab_engine.discover_full_frame(
+                    image_np,
+                    camera_id=frame_obj.camera_id,
+                    timestamp=frame_obj.timestamp,
+                    frame_id=frame_obj.frame_id
+                )
+                if discovered:
+                    open_vocab_dets.extend(discovered)
+                self.last_keyframe_time = frame_obj.timestamp
+
+            if open_vocab_dets:
+                tracks = self.tracker.associate_open_vocab_detections(open_vocab_dets, timestamp=frame_obj.timestamp)
+
         self.last_tracks = tracks
 
         new_alerts: List[AlertOutput] = []

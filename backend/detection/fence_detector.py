@@ -71,7 +71,7 @@ class FenceDetector:
             vertical_x: List[float] = []
             if v_lines is not None:
                 for line in v_lines:
-                    x1, y1, x2, y2 = line[0]
+                    x1, y1, x2, y2 = line.ravel()
                     dx, dy = abs(x2 - x1), abs(y2 - y1)
                     if dy == 0:
                         continue
@@ -87,7 +87,7 @@ class FenceDetector:
             horizontal_segments: List[Tuple[float, float]] = []
             if h_lines is not None:
                 for line in h_lines:
-                    x1, y1, x2, y2 = line[0]
+                    x1, y1, x2, y2 = line.ravel()
                     dx, dy = abs(x2 - x1), abs(y2 - y1)
                     if dx == 0:
                         continue
@@ -103,7 +103,7 @@ class FenceDetector:
             diag_count = 0
             if d_lines is not None:
                 for line in d_lines:
-                    x1, y1, x2, y2 = line[0]
+                    x1, y1, x2, y2 = line.ravel()
                     dx, dy = abs(x2 - x1), abs(y2 - y1)
                     if dx == 0:
                         continue

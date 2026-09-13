@@ -156,6 +156,87 @@ demo_degraded = st.sidebar.checkbox(
     help="Applies synthetic optical blur and underexposure to demonstrate independent reliability scoring.",
 )
 
+st.sidebar.markdown("---")
+st.sidebar.header("🤖 Detection Engine & Open-Vocab")
+
+detection_mode_selected = st.sidebar.radio(
+    "Detection Mode",
+    [
+        "Hybrid Architecture (Recommended)",
+        "Standard YOLO",
+        "Open Vocabulary Only",
+    ],
+    index=0,
+    help="Hybrid uses fast YOLO for every frame + scheduled keyframe open-vocab discovery (fence, stone, gate)."
+)
+
+prompt_preset_choice = st.sidebar.selectbox(
+    "Prompt Preset Vocabulary",
+    [
+        "🛡️ Border Perimeter",
+        "🏙️ General Surveillance",
+        "✍️ Custom Write-in Prompts"
+    ],
+    index=0
+)
+
+custom_prompts_input = ""
+if "Custom" in prompt_preset_choice:
+    custom_prompts_input = st.sidebar.text_input(
+        "Custom Class Prompts (comma-separated)",
+        value="person, dog, fence, stone, border marker, vehicle"
+    )
+
+keyframe_interval_val = st.sidebar.slider(
+    "Keyframe Discovery Interval (Seconds)",
+    min_value=0.5,
+    max_value=5.0,
+    value=2.0,
+    step=0.5,
+    help="Time interval between full-frame open-vocabulary discovery scans."
+)
+
+# Apply settings updates dynamically
+if "Hybrid" in detection_mode_selected:
+    settings.HYBRID_DETECTION_MODE = "hybrid"
+elif "Standard" in detection_mode_selected:
+    settings.HYBRID_DETECTION_MODE = "standard"
+else:
+    settings.HYBRID_DETECTION_MODE = "open_vocabulary"
+
+settings.SMART_DETECTION_INTERVAL_SECONDS = keyframe_interval_val
+
+# Check open-vocab model weight availability
+ov_weights_path = settings.OPEN_VOCAB_MODEL_PATH
+weights_exist = os.path.exists(ov_weights_path) and os.path.getsize(ov_weights_path) > 0
+
+if not weights_exist:
+    st.sidebar.warning(f"⚠️ Open-vocabulary weights not found at `{ov_weights_path}`")
+    if st.sidebar.button("📥 Download Open-Vocabulary Weights"):
+        with st.sidebar.spinner("Downloading yolov8s-worldv2.pt model weights..."):
+            try:
+                from scripts.download_open_vocab_model import download_model
+                download_model(target_dir=os.path.dirname(ov_weights_path), model_name=os.path.basename(ov_weights_path))
+                st.sidebar.success("✅ Model weights downloaded successfully!")
+                st.rerun()
+            except Exception as dl_err:
+                st.sidebar.error(f"Download failed: {dl_err}")
+else:
+    st.sidebar.caption(f"✅ Open-Vocab Weights Ready (`{os.path.basename(ov_weights_path)}`)")
+
+# Set active prompt preset
+if "Border" in prompt_preset_choice:
+    active_prompt_list = [
+        "person", "dog", "vehicle", "fence", "chain link fence", "gate",
+        "rock", "stone", "backpack", "bicycle", "motorcycle", "pole", "border marker"
+    ]
+elif "General" in prompt_preset_choice:
+    active_prompt_list = [
+        "person", "car", "truck", "bus", "motorcycle", "bicycle", "dog", "cat", "backpack", "bag"
+    ]
+else:
+    active_prompt_list = [p.strip() for p in custom_prompts_input.split(",") if p.strip()]
+
 # ─────────────────────────────────────────────────────────────────────────────
 # INPUT-TYPE HANDLING & RESOLUTION
 # ─────────────────────────────────────────────────────────────────────────────
@@ -396,6 +477,8 @@ if start_clicked and selected_file_path:
         else:
             source = FileVideoSource(file_path=selected_file_path, camera_id=camera_id)
         pipeline = IBVAPXPipeline(enable_demo_degradation=demo_degraded)
+        if hasattr(pipeline, "open_vocab_engine") and pipeline.open_vocab_engine.is_available:
+            pipeline.open_vocab_engine.set_classes(active_prompt_list)
     except Exception as e:
         init_error = str(e)
         logger.error("Pipeline init error: %s", e)
@@ -415,15 +498,22 @@ if start_clicked and selected_file_path:
             m_dev = m_info.get("device", "cpu")
             m_conf = m_info.get("confidence_threshold", 0.30)
             m_sz = m_info.get("image_size", 640)
-            m_unsupp = m_info.get("unsupported_classes", ["fence", "stone"])
+            ov_info = m_info.get("open_vocab", {})
+            ov_avail = ov_info.get("is_available", False)
             
             mc1, mc2, mc3, mc4 = st.columns(4)
-            mc1.markdown(f"**Loaded Model:** `{m_name}`")
+            mc1.markdown(f"**Primary Model:** `{m_name}`")
             mc2.markdown(f"**Device:** `{m_dev}` | **Size:** `{m_sz}px`")
-            mc3.markdown(f"**Conf Thresh:** `{m_conf}`")
-            mc4.markdown(f"**Unsupported:** `{', '.join(m_unsupp)}`")
-            if m_unsupp:
-                st.info("ℹ️ Standard `yolov8n.pt` is a COCO model. Domain classes like `fence` or `stone` are not in COCO weights. Provide custom weights in settings to enable custom classes.")
+            mc3.markdown(f"**Detection Mode:** `{settings.HYBRID_DETECTION_MODE.upper()}`")
+            mc4.markdown(f"**Open-Vocab Status:** `{'ONLINE' if ov_avail else 'OFFLINE / UNLOADED'}`")
+            
+            if ov_avail:
+                st.success(
+                    f"🤖 **Open-Vocabulary Engine Active**: Checkpoint `{os.path.basename(ov_info.get('model_path', ''))}` | "
+                    f"Active Prompts: `{', '.join(ov_info.get('active_prompts', []))}` | Keyframe Interval: `{settings.SMART_DETECTION_INTERVAL_SECONDS}s`"
+                )
+            else:
+                st.info("ℹ️ Standard `yolov8n.pt` COCO model active. Open-vocabulary discovery disabled or weights missing.")
 
         frame_placeholder = st.empty()
         progress_bar = st.progress(0)
@@ -1006,6 +1096,8 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
                 "Track": f"#{tid}",
                 "Class": cname,
                 "Confidence": f"{conf_val:.1f}%",
+                "Detection Source": ent.get("source", "YOLO"),
+                "Label Stability": ent.get("label_stability", "HIGH"),
                 "Monitored Zone": "Perimeter Barrier" if is_fence else ent.get("zone", "Restricted Zone Alpha"),
                 "Time in Zone": time_in_zone,
                 "Direction": "STATIONARY" if is_fence else ent.get("direction", "TOWARD_BOUNDARY"),

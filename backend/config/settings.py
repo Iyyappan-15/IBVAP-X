@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     DB_URL_POSTGRES: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ibvapx_dev"
     DB_URL_SQLITE: str = "sqlite:///./data/ibvapx_local.db"
 
-    # Object Detection (YOLO)
+    # Object Detection (YOLO & Open-Vocabulary)
     YOLO_MODEL_PATH: str = "data/models/yolov8n.pt"
     YOLO_CONFIDENCE_THRESHOLD: float = 0.20
     YOLO_IOU_THRESHOLD: float = 0.45
@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     YOLO_DETECT_CLASSES: str = "person,dog,cat,bottle,car,motorcycle,bus,truck,backpack,handbag,suitcase,knife,cell phone,cup,chair"
     CUSTOM_MODEL_PATH: str = "data/models/ibvapx_custom.pt"
     CUSTOM_CLASSES: str = "fence,stone"
+
+    # Dual-Path Open-Vocabulary & Semantic Refinement Settings
+    HYBRID_DETECTION_MODE: str = "hybrid"  # "standard", "open_vocabulary", "hybrid"
+    OPEN_VOCAB_MODEL_PATH: str = "data/models/yolov8s-worldv2.pt"
+    OPEN_VOCAB_AUTO_DOWNLOAD: bool = False
+    SMART_DETECTION_INTERVAL_SECONDS: float = 2.0
+    ENABLE_UNCLASSIFIED_FLAGGING: bool = False
+    PROMPT_PRESET_DEFAULT: str = "perimeter"
 
     # Object Tracking
     TRACK_EVICTION_FRAMES: int = 30
