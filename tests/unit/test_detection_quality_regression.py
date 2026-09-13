@@ -131,3 +131,86 @@ def test_pipeline_signature_backwards_compatibility():
     assert isinstance(pipeline.last_frame_result, AnalysisFrameResult)
     assert pipeline.last_frame_result.frame_id == 1
     assert pipeline.last_frame_result.camera_id == "CAM-01"
+
+
+def test_suppress_nested_subboxes_eradicates_torso_bottle():
+    """Verifies that false handheld items (bottle/stone) covering a person's torso are suppressed."""
+    from backend.detection.detector import suppress_nested_subboxes
+
+    person_det = Detection(
+        class_id=0, class_name="person", confidence=0.88,
+        bbox=[100.0, 100.0, 200.0, 350.0],  # w=100, h=250, area=25000
+        camera_id="CAM-01", timestamp=time.time(), frame_id=1
+    )
+    # A large torso box misdetected as bottle (area=6000, 24% of person area, 100% inside person)
+    torso_bottle = Detection(
+        class_id=39, class_name="bottle", confidence=0.75,
+        bbox=[120.0, 160.0, 180.0, 260.0],  # w=60, h=100, area=6000
+        camera_id="CAM-01", timestamp=time.time(), frame_id=1
+    )
+    # A genuine tiny held item at the hand (area=400, 1.6% of person area)
+    hand_phone = Detection(
+        class_id=67, class_name="cell phone", confidence=0.82,
+        bbox=[90.0, 200.0, 110.0, 220.0],  # w=20, h=20, area=400
+        camera_id="CAM-01", timestamp=time.time(), frame_id=1
+    )
+
+    cleaned = suppress_nested_subboxes([person_det, torso_bottle, hand_phone])
+    class_names = [d.class_name for d in cleaned]
+
+    assert "person" in class_names
+    assert "bottle" not in class_names  # Torso bottle MUST be suppressed!
+    assert "cell phone" in class_names  # Small handheld item is preserved
+
+
+def test_refine_detection_classes_quadruped_vs_person():
+    """Verifies that horizontal quadruped animals are classified as dog, while upright persons are preserved."""
+    from backend.detection.detector import refine_detection_classes
+
+    upright_person = Detection(
+        class_id=0, class_name="person", confidence=0.85,
+        bbox=[100.0, 100.0, 180.0, 320.0],  # w=80, h=220, AR=2.75 (tall)
+        camera_id="CAM-01", timestamp=time.time(), frame_id=1
+    )
+    dog_misclassified_as_person = Detection(
+        class_id=0, class_name="person", confidence=0.70,
+        bbox=[300.0, 350.0, 390.0, 420.0],  # w=90, h=70, AR=0.78 (horizontal quadruped)
+        camera_id="CAM-01", timestamp=time.time(), frame_id=1
+    )
+
+    refined = refine_detection_classes([upright_person, dog_misclassified_as_person], img_height=600, img_width=800)
+    assert refined[0].class_name == "person"
+    assert refined[1].class_name == "dog"
+    assert refined[1].class_id == 16
+
+
+def test_tracker_upright_person_immune_to_bottle_corruption():
+    """Verifies that an upright walking person track is locked to 'person' and cannot be rebranded into bottle or stone."""
+    from backend.detection.tracker import ObjectTracker
+
+    tracker = ObjectTracker()
+    track_data = {
+        "track_id": 4,
+        "class_name": "bottle",
+        "bbox": [200.0, 150.0, 290.0, 380.0],  # w=90, h=230, AR=2.55 (upright person)
+        "class_history": [("bottle", 0.91), ("bottle", 0.91), ("person", 0.85)],
+        "label_stability": "LOW"
+    }
+
+    tracker._update_track_label_stability(track_data)
+    assert track_data["class_name"] == "person"  # Guaranteed person protection!
+
+
+def test_fence_detector_rejects_sky_fog_images():
+    """Verifies that FenceDetector does not hallucinate fence in uniform foggy sky."""
+    from backend.detection.fence_detector import FenceDetector
+
+    fd = FenceDetector()
+    # Foggy sky image: flat gradient with no diamond mesh
+    fog_img = np.full((600, 800, 3), 200, dtype=np.uint8)
+    # Add subtle horizontal fog bands
+    fog_img[100:150, :] = 195
+    fog_img[200:230, :] = 190
+
+    results = fd.detect_fence(fog_img)
+    assert len(results) == 0  # Zero false positive fence in sky!

@@ -45,6 +45,8 @@ data/demo/*.avi
 data/demo/*.mov
 data/evidence/*.mp4
 data/evidence/*.jpg
+data/evidence/*.json
+data/evidence/*.jsonl
 
 # IDEs & OS
 .vscode/

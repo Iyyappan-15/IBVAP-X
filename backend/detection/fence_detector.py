@@ -117,9 +117,9 @@ class FenceDetector:
                             diag_neg += 1
             diag_count = diag_pos + diag_neg
 
-            # Genuine perimeter chain-link fence requires bidirectional diamond cross-hatching or multiple rails
-            has_diamond_mesh = (diag_pos >= 12 and diag_neg >= 12 and diag_count >= 28)
-            has_rails = len(horizontal_segments) >= 3
+            # Genuine perimeter chain-link fence requires bidirectional diamond cross-hatching or multiple rails with vertical posts
+            has_diamond_mesh = (diag_pos >= 14 and diag_neg >= 14 and diag_count >= 32)
+            has_rails = len(horizontal_segments) >= 3 and len(vertical_x) >= 12
 
             if len(vertical_x) < 8 or (not has_diamond_mesh and not has_rails):
                 return []
@@ -147,20 +147,49 @@ class FenceDetector:
             if cv_spacing > 0.40:  # Require regular spacing (reject random foliage/trees)
                 return []
 
-            # Build bounding box for perimeter fence
+            # Build tight bounding box for perimeter fence from detected fence line points
+            fence_y_pts: List[float] = []
+            if d_lines is not None and has_diamond_mesh:
+                for line in d_lines:
+                    _, y1, _, y2 = line.ravel()
+                    fence_y_pts.extend([y1, y2])
+            if h_lines is not None:
+                for line in h_lines:
+                    _, y1, _, y2 = line.ravel()
+                    fence_y_pts.extend([y1, y2])
+            if v_lines is not None:
+                for line in v_lines:
+                    _, y1, _, y2 = line.ravel()
+                    fence_y_pts.extend([y1, y2])
+
+            if fence_y_pts:
+                min_y = float(np.percentile(fence_y_pts, 5))
+                max_y = float(np.percentile(fence_y_pts, 95))
+                fy1 = max(0, int(band_y1 + min_y - 8))
+                fy2 = min(h, int(band_y1 + max_y + 8))
+            else:
+                fy1 = max(0, band_y1)
+                fy2 = min(h, band_y2)
+
             fx1 = max(0, int(min(centroids) - 10))
             fx2 = min(w, int(max(centroids) + 10))
-            fy1 = band_y1
-            fy2 = band_y2
 
-            # Fence must span at least 15% of frame width
-            if (fx2 - fx1) < int(w * 0.15):
+            # Guard 1: Fence must have significant height and span at least 15% of frame width
+            if (fy2 - fy1) < 25 or (fx2 - fx1) < int(w * 0.15):
+                return []
+
+            # Guard 2: Groundedness: A perimeter boundary fence must reach down to the lower half of frame
+            if fy2 < int(h * 0.48):
+                return []
+
+            # Guard 3: Sky exclusion: A boundary fence never floats in the upper sky
+            if fy1 < int(h * 0.20) and fy2 < int(h * 0.55):
                 return []
 
             # Require minimum edge mesh density and cross-hatching to reject open snow/trees/horizons
             candidate_roi_edges = edges[:, fx1:fx2]
             edge_density = float(np.count_nonzero(candidate_roi_edges)) / float(max(1, candidate_roi_edges.size))
-            if edge_density < 0.045 or (not has_diamond_mesh and not has_rails):
+            if edge_density < 0.045:
                 logger.debug(f"[FenceDetector] Rejected candidate: edge_density={edge_density:.4f}, diags={diag_count} (pos={diag_pos}, neg={diag_neg})")
                 return []
 

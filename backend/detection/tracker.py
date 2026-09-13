@@ -348,12 +348,19 @@ class ObjectTracker:
         assigned_class = top_class[0]
 
         # Biomechanical sanity check: A human track standing/walking has height > width (AR >= 1.35)
-        # Ground-level quadruped animals have horizontal/compact proportions (AR <= 1.30)
+        # Ground-level quadruped animals have horizontal/compact proportions (AR <= 1.25)
         bbox = tdata.get("bbox", [0, 0, 0, 0])
         tbw = max(1.0, float(bbox[2] - bbox[0]))
         tbh = max(1.0, float(bbox[3] - bbox[1]))
-        if assigned_class == "person" and (tbh / tbw) <= 1.30 and tbh < 220.0:
+        if assigned_class == "person" and (tbh / tbw) <= 1.25 and tbh < 220.0:
             assigned_class = "dog"
+
+        # Human vs handheld item protection: An upright tall object is NEVER a bottle, cup, or stone
+        if assigned_class in ("bottle", "cup", "stone", "knife", "cell phone"):
+            if tbh >= 70.0 and (tbh / tbw) >= 1.30:
+                assigned_class = "person"
+            elif any(c == "person" for c, _ in class_hist):
+                assigned_class = "person"
 
         tdata["class_name"] = assigned_class
         if top_weight_ratio >= 0.70:
@@ -387,10 +394,6 @@ class ObjectTracker:
                 if tid_a in suppressed_ids:
                     continue
 
-                # Containment check for same class (especially person)
-                if data_a["class_name"] != data_b["class_name"]:
-                    continue
-
                 box_a = data_a["bbox"]
                 area_a = box_area(box_a)
                 if area_a <= area_b:
@@ -403,10 +406,18 @@ class ObjectTracker:
                 inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
                 containment = inter / area_b
 
-                # If box B is 35%+ contained inside larger box A of same class, evict B
-                if containment >= 0.35:
-                    suppressed_ids.add(tid_b)
-                    break
+                # Containment check for same class (especially person)
+                if data_a["class_name"] == data_b["class_name"]:
+                    # If box B is 30%+ contained inside larger box A of same class, evict B
+                    if containment >= 0.30:
+                        suppressed_ids.add(tid_b)
+                        break
+
+                # Suppress false handheld items / small items that cover a person's torso
+                if data_a["class_name"] == "person" and data_b["class_name"] in ("bottle", "stone", "cup", "cell phone", "knife"):
+                    if containment >= 0.35 and area_b > 0.08 * area_a:
+                        suppressed_ids.add(tid_b)
+                        break
 
         for sid in suppressed_ids:
             if sid in self.active_tracks:
