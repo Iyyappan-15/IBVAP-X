@@ -303,24 +303,30 @@ class ObjectDetector:
                 logger.warning(f"[Detector] No image content available for frame {frame_obj.frame_id}")
                 return []
 
-        # 1. Adaptive contrast enhancement for night / low-light CCTV
+        # 1. Adaptive contrast enhancement for night / low-light / low-contrast foggy CCTV
         yolo_input = image_np
+        is_low_contrast = False
         try:
-            gray_check = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
-            if np.mean(gray_check) < 70.0:
+            gray_check = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY) if len(image_np.shape) == 3 else image_np
+            mean_lum = float(np.mean(gray_check))
+            std_lum = float(np.std(gray_check))
+            if mean_lum < 70.0 or std_lum < 40.0:
+                is_low_contrast = True
                 lab = cv2.cvtColor(image_np, cv2.COLOR_BGR2LAB)
                 l, a, b = cv2.split(lab)
-                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
                 cl = clahe.apply(l)
                 enhanced_lab = cv2.merge((cl, a, b))
                 yolo_input = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
         except Exception:
             yolo_input = image_np
 
+        effective_conf = max(0.15, self.confidence_threshold - 0.08) if is_low_contrast else self.confidence_threshold
+
         # 2. Run YOLO inference
         results = self.model(
             yolo_input,
-            conf=self.confidence_threshold,
+            conf=effective_conf,
             iou=0.45,
             agnostic_nms=True,
             classes=self.target_class_ids if self.target_class_ids else None,
@@ -340,7 +346,7 @@ class ObjectDetector:
                 cls_id = int(box.cls[0].cpu().numpy())
                 cls_name = self.model.names.get(cls_id, f"class_{cls_id}")
 
-                if conf < self.confidence_threshold:
+                if conf < effective_conf:
                     continue
 
                 # Map sports ball / bottle / phone near hand to stone/object if relevant
