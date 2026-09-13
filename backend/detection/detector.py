@@ -16,12 +16,11 @@ class ModelNotFoundError(Exception):
     pass
 
 
-def suppress_nested_subboxes(detections: List[Detection], containment_threshold: float = 0.60) -> List[Detection]:
+def suppress_nested_subboxes(detections: List[Detection], containment_threshold: float = 0.40) -> List[Detection]:
     """
-    Suppresses nested / containment duplicate detections (e.g. YOLO detecting a car window/door
-    as an extra car inside a larger car box).
-    If Box B is >= containment_threshold (60%) contained inside Box A of the same class/vehicle category,
-    the smaller Box B is suppressed.
+    Suppresses nested / containment duplicate detections (e.g. YOLO detecting a leg or arm
+    as an extra person box inside a main person box, or car window inside a car).
+    If Box B is contained inside Box A of the same category, the smaller Box B is suppressed.
     """
     if len(detections) <= 1:
         return detections
@@ -64,7 +63,10 @@ def suppress_nested_subboxes(detections: List[Detection], containment_threshold:
 
             containment = intersection / area_b
 
-            if containment >= containment_threshold and area_a > area_b:
+            # Aggressive suppression for person sub-boxes (arms/legs/torso inside full person)
+            th = 0.35 if det_b.class_name == "person" else containment_threshold
+
+            if containment >= th and area_a > area_b:
                 is_contained_duplicate = True
                 break
 

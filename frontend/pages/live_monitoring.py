@@ -110,15 +110,34 @@ input_type = st.sidebar.radio(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("⚙️ Processing Settings")
+playback_speed_preset = st.sidebar.radio(
+    "Playback Speed Control",
+    [
+        "🐢 Slow Step-by-Step (1 FPS — 1s / frame)",
+        "🚶 Measured Inspection (3 FPS — 0.33s / frame)",
+        "🏃 Standard Video Speed (10 FPS)",
+        "⚡ Fast Preview (20 FPS)",
+    ],
+    index=0,
+    help="Select slow step-by-step playback for detailed frame-by-frame operator inspection as requested.",
+)
+
+if "1 FPS" in playback_speed_preset:
+    preset_fps_val = 1
+elif "3 FPS" in playback_speed_preset:
+    preset_fps_val = 3
+elif "10 FPS" in playback_speed_preset:
+    preset_fps_val = 10
+else:
+    preset_fps_val = 20
 
 playback_fps = st.sidebar.slider(
-    "Playback Animation (FPS)",
-    min_value=5,
+    "Fine-Tune Playback Rate (FPS)",
+    min_value=1,
     max_value=30,
-    value=15,
-    step=5,
-    help="Controls the visual animation rendering rate for comfortable operator inspection.",
+    value=preset_fps_val,
+    step=1,
+    help="Controls the visual animation rendering rate down to 1 frame per second for detailed inspection.",
 )
 
 processing_mode = st.sidebar.radio(
@@ -612,7 +631,8 @@ if start_clicked and selected_file_path:
                 stat_fps.metric("Processing FPS", f"{live_fps:.1f}")
                 stat_objs.metric("Detections", len(current_dets))
                 stat_tracks.metric("Active Tracks", len(active_t))
-                stat_alerts.metric("Alerts", len(all_alerts_collected))
+                unique_alert_tracks = len(set(a.get("track_id") for a in all_alerts_collected))
+                stat_alerts.metric("Alert Incidents", unique_alert_tracks)
 
                 rel_obj = getattr(pipeline, "last_reliability", None)
                 if rel_obj and hasattr(rel_obj, "status"):
