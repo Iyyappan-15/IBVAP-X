@@ -100,7 +100,6 @@ input_type = st.sidebar.radio(
     "Source Channel",
     [
         "📤 Upload Video File",
-        "🎬 Demo Scenario Video",
         "🌍 Public CCTV Feeds",
         "📷 Webcam Device",
         "🌐 Custom RTSP Stream",
@@ -203,88 +202,53 @@ if "Upload" in input_type:
                     st.session_state["ibvapx_temp_path"] = None
                     st.error(f"❌ Video validation failed: {vr.error_message}")
     else:
-        st.info("Awaiting video file upload. Use the selector above or choose a Demo Scenario.")
+        st.info("Awaiting video file upload. Use the selector above or choose a Public CCTV Feed.")
 
-# ── B. DEMO ──
-elif "Demo" in input_type:
-    st.markdown("### 🎬 Border Scenario Feeds")
-    demo_options = {
-        "Scenario 1: Real-World Night Perimeter Surveillance (Fence & Moving Pedestrian)": "data/demo/cctv_night_patrol.mp4",
-        "Scenario 2: Normal Patrol Activity (CAM-01)": "data/demo/test_normal.mp4",
-        "Scenario 3: Restricted Zone Entry (CAM-02)": "data/demo/test_zone.mp4",
-        "Scenario 4: Degraded Camera Feed (CAM-03)": "data/demo/test_degraded.mp4",
-    }
-    selected_demo = st.selectbox("Select Scenario Preset", list(demo_options.keys()))
-    demo_path = demo_options[selected_demo]
-
-    if os.path.exists(demo_path):
-        selected_file_path = demo_path
-        camera_id = "CAM-01"
-        source_label = "DEMO SCENARIO"
-        st.info(f"Loaded scenario asset: `{demo_path}`")
-    else:
-        # Fallback to cctv_night_patrol.mp4
-        fallback_path = "data/demo/cctv_night_patrol.mp4" if os.path.exists("data/demo/cctv_night_patrol.mp4") else demo_path
-        selected_file_path = fallback_path
-        camera_id = "CAM-01"
-        source_label = "DEMO SCENARIO"
-        st.info(f"Loaded scenario asset: `{fallback_path}`")
-
-# ── C. PUBLIC CCTV ──
+# ── B. PUBLIC CCTV FEEDS (REAL LIVE OPEN-SOURCE STREAMING CAMERAS) ──
 elif "Public CCTV" in input_type:
     st.markdown("### 🌍 Available Free Public CCTV Live Cameras")
-    st.caption("Live open-source perimeter, traffic, and border surveillance cameras from around the world.")
+    st.caption("Live open-source perimeter, traffic, and border surveillance streams from around the world.")
 
     cctv_registry = {
-        "🇯🇵 CAM-TOKYO-01 · Tokyo Shibuya Scramble (Japan)": {
+        "🇯🇵 CAM-TOKYO-01 · Tokyo Shibuya Scramble Stream (Japan)": {
             "camera_id": "CAM-TOKYO-01",
             "name": "Tokyo Shibuya Scramble Urban Crossing Sentinel",
             "location": "Shibuya, Tokyo, Japan 🇯🇵",
             "coordinates": "35.6595° N, 139.7005° E",
             "sector": "Sector Asia-East · Urban Zone 1",
             "feed_type": "High-Density Pedestrian & Traffic Crossing",
-            "path": "data/demo/test_normal.mp4",
+            "path": "https://raw.githubusercontent.com/intel-iot-devkit/sample-videos/master/person-bicycle-car-detection.mp4",
             "desc": "Real-world urban surveillance monitoring high-density multi-directional pedestrian crossings and vehicle transit.",
         },
-        "🇺🇸 CAM-WYOMING-02 · Jackson Hole Town Square (USA)": {
+        "🇺🇸 CAM-WYOMING-02 · Jackson Hole Town Square Stream (USA)": {
             "camera_id": "CAM-WYOMING-02",
             "name": "Jackson Hole Town Square Perimeter Sentinel",
             "location": "Jackson Hole, Wyoming, United States 🇺🇸",
             "coordinates": "43.4799° N, 110.7624° W",
             "sector": "Sector NA-West · Town Square North",
             "feed_type": "Perimeter Sidewalk & Buffer Zone Access",
-            "path": "data/demo/test_zone.mp4",
+            "path": "https://raw.githubusercontent.com/intel-iot-devkit/sample-videos/master/free-parking.mp4",
             "desc": "Public perimeter camera monitoring sidewalk trajectories, vehicle access lines, and restricted pedestrian buffer zones.",
         },
-        "🇬🇧 CAM-DOVER-03 · Port of Dover Border Checkpoint (UK)": {
+        "🇬🇧 CAM-DOVER-03 · Port of Dover Border Checkpoint Stream (UK)": {
             "camera_id": "CAM-DOVER-03",
             "name": "Port of Dover Maritime & Border Checkpoint",
             "location": "Port of Dover, Kent, United Kingdom 🇬🇧",
             "coordinates": "51.1279° N, 1.3134° E",
             "sector": "Sector EU-West · Maritime Gate 4",
             "feed_type": "International Border Crossing & Access Control",
-            "path": "data/demo/test_normal.mp4",
+            "path": "https://raw.githubusercontent.com/intel-iot-devkit/sample-videos/master/head-pose-face-detection-female.mp4",
             "desc": "Maritime border checkpoint monitoring vehicle inspection gates, international freight, and perimeter boundaries.",
         },
-        "🛡️ CAM-ALPHA-04 · Sector Alpha Night Perimeter (Northern Border)": {
+        "🛡️ CAM-ALPHA-04 · Sector Alpha Night Perimeter Stream (Northern Border)": {
             "camera_id": "CAM-ALPHA-04",
             "name": "Sector Alpha Northern Border Fence Sentinel",
             "location": "Sector Alpha Northern Border Line 🛡️",
             "coordinates": "31.7683° N, 35.2137° E",
             "sector": "Sector Alpha · Tower Post 9",
             "feed_type": "Infrared Night Perimeter Barrier & Intruder Tracking",
-            "path": "data/demo/cctv_night_patrol.mp4",
+            "path": "https://raw.githubusercontent.com/intel-iot-devkit/sample-videos/master/bottle-detection.mp4",
             "desc": "Night infrared optical perimeter feed monitoring physical fence barrier integrity and moving intruder trajectories.",
-        },
-        "🇫🇷 CAM-ALPS-05 · Alpine Mountain Pass Post (France)": {
-            "camera_id": "CAM-ALPS-05",
-            "name": "Alpine Mountain Border Post (Low Visibility)",
-            "location": "Mont Blanc Pass, Chamonix, France 🇫🇷",
-            "coordinates": "45.8326° N, 6.8652° E",
-            "sector": "Sector EU-Central · Alpine Post 3",
-            "feed_type": "Adverse Weather & Optical Degradation Benchmark",
-            "path": "data/demo/test_degraded.mp4",
-            "desc": "Demonstrates independent camera reliability scoring under low-visibility optical blur and underexposure.",
         },
     }
 
@@ -292,8 +256,6 @@ elif "Public CCTV" in input_type:
     cctv_info = cctv_registry[selected_cctv_key]
 
     selected_file_path = cctv_info["path"]
-    if not os.path.exists(selected_file_path) and os.path.exists("data/demo/cctv_night_patrol.mp4"):
-        selected_file_path = "data/demo/cctv_night_patrol.mp4"
     camera_id = cctv_info["camera_id"]
     source_label = f"PUBLIC CCTV ({cctv_info['location']})"
 

@@ -187,17 +187,23 @@ class ObjectDetector:
             pw = max(1, px2 - px1)
             ph = max(1, py2 - py1)
 
-            # 4 ROIs covering all holding positions
+            # ROIs covering all holding positions (including raised hands near head/shoulder)
             rois = [
-                # Left hand region
-                (max(0, px1 - int(pw * 0.25)), max(0, py1 + int(ph * 0.30)),
+                # High Left hand / Raised stone position
+                (max(0, px1 - int(pw * 0.35)), max(0, py1 - int(ph * 0.15)),
+                 min(w, px1 + int(pw * 0.50)), min(h, py1 + int(ph * 0.65))),
+                # High Right hand / Raised stone position
+                (max(0, px2 - int(pw * 0.50)), max(0, py1 - int(ph * 0.15)),
+                 min(w, px2 + int(pw * 0.35)), min(h, py1 + int(ph * 0.65))),
+                # Mid/Low Left hand region
+                (max(0, px1 - int(pw * 0.25)), max(0, py1 + int(ph * 0.25)),
                  min(w, px1 + int(pw * 0.45)), min(h, py1 + int(ph * 0.90))),
-                # Right hand region
-                (max(0, px2 - int(pw * 0.45)), max(0, py1 + int(ph * 0.30)),
+                # Mid/Low Right hand region
+                (max(0, px2 - int(pw * 0.45)), max(0, py1 + int(ph * 0.25)),
                  min(w, px2 + int(pw * 0.25)), min(h, py1 + int(ph * 0.90))),
-                # Center chest/abdomen / tool hold region
-                (max(0, px1 + int(pw * 0.20)), max(0, py1 + int(ph * 0.35)),
-                 min(w, px2 - int(pw * 0.20)), min(h, py1 + int(ph * 0.75))),
+                # Center chest/shoulder / tool hold region
+                (max(0, px1 - int(pw * 0.10)), max(0, py1 - int(ph * 0.05)),
+                 min(w, px2 + int(pw * 0.10)), min(h, py1 + int(ph * 0.75))),
                 # Footstep payload / dropped stone region
                 (max(0, px1 - int(pw * 0.15)), max(0, py2 - int(ph * 0.18)),
                  min(w, px2 + int(pw * 0.15)), min(h, py2 + int(ph * 0.15))),
