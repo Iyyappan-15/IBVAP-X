@@ -145,7 +145,8 @@ class ObjectDetector:
         frame_id: int
     ) -> List[Detection]:
         """
-        Detects compact handheld objects (stones, tools, thrown items) in or near the hand regions of detected persons.
+        Detects compact handheld objects (stones, tools, wire cutters, thrown items)
+        in hands, chest/abdomen, and payload zones of detected persons.
         """
         if image_np is None or not person_detections:
             return []
@@ -159,15 +160,19 @@ class ObjectDetector:
             pw = max(1, px2 - px1)
             ph = max(1, py2 - py1)
 
-            # Hand regions: left and right lateral torso sectors
-            hand_rois = [
+            # Regions of interest: Left Hand, Right Hand, Center Chest/Waist, and Ground Footstep Payload
+            rois = [
                 # Left hand region
-                (max(0, px1 - int(pw * 0.30)), max(0, py1 + int(ph * 0.35)), min(w, px1 + int(pw * 0.40)), min(h, py1 + int(ph * 0.85))),
+                (max(0, px1 - int(pw * 0.25)), max(0, py1 + int(ph * 0.30)), min(w, px1 + int(pw * 0.45)), min(h, py1 + int(ph * 0.90))),
                 # Right hand region
-                (max(0, px2 - int(pw * 0.40)), max(0, py1 + int(ph * 0.35)), min(w, px2 + int(pw * 0.30)), min(h, py1 + int(ph * 0.85))),
+                (max(0, px2 - int(pw * 0.45)), max(0, py1 + int(ph * 0.30)), min(w, px2 + int(pw * 0.25)), min(h, py1 + int(ph * 0.90))),
+                # Center chest/abdomen / tool hold region
+                (max(0, px1 + int(pw * 0.20)), max(0, py1 + int(ph * 0.35)), min(w, px2 - int(pw * 0.20)), min(h, py1 + int(ph * 0.75))),
+                # Footstep payload / dropped stone region
+                (max(0, px1 - int(pw * 0.15)), max(0, py2 - int(ph * 0.18)), min(w, px2 + int(pw * 0.15)), min(h, py2 + int(ph * 0.15))),
             ]
 
-            for rx1, ry1, rx2, ry2 in hand_rois:
+            for rx1, ry1, rx2, ry2 in rois:
                 if rx2 <= rx1 or ry2 <= ry1:
                     continue
 
@@ -175,47 +180,49 @@ class ObjectDetector:
                 if roi_gray.size == 0:
                     continue
 
-                # Detect salient compact objects using thresholding & contour analysis
-                roi_blur = cv2.GaussianBlur(roi_gray, (5, 5), 0)
-                # Adaptive gradient / Laplacian for high-contrast stone/object texture
-                lap = cv2.Laplacian(roi_blur, cv2.CV_64F)
-                lap_abs = cv2.convertScaleAbs(lap)
-                _, thresh = cv2.threshold(lap_abs, 20, 255, cv2.THRESH_BINARY)
+                # Adaptive gradient & edge analysis for stone/tool texture
+                roi_blur = cv2.GaussianBlur(roi_gray, (3, 3), 0)
+                # Sobel + Canny combined edge intensity
+                canny = cv2.Canny(roi_blur, 30, 100)
+                lap = cv2.convertScaleAbs(cv2.Laplacian(roi_blur, cv2.CV_64F))
+                combined = cv2.bitwise_or(canny, cv2.threshold(lap, 15, 255, cv2.THRESH_BINARY)[1])
 
-                contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                # Morphological close to bridge internal object contours
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+                closed = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
+
+                contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 for cnt in contours:
                     area = cv2.contourArea(cnt)
-                    # Stone/handheld object size limits
-                    if 120 <= area <= int(pw * ph * 0.18):
+                    # Handheld object size constraint
+                    if 45 <= area <= int(pw * ph * 0.22):
                         cx, cy, cw, ch = cv2.boundingRect(cnt)
                         aspect = float(cw) / max(1, float(ch))
-                        if 0.4 <= aspect <= 2.5 and cw >= 14 and ch >= 14:
+                        if 0.30 <= aspect <= 3.0 and cw >= 8 and ch >= 8:
                             ox1 = float(rx1 + cx)
                             oy1 = float(ry1 + cy)
                             ox2 = float(rx1 + cx + cw)
                             oy2 = float(ry1 + cy + ch)
 
-                            # Ensure it's not a duplicate
-                            is_dup = False
-                            for ed in handheld_dets:
-                                ex1, ey1, ex2, ey2 = ed.bbox
-                                if abs(ox1 - ex1) < 20 and abs(oy1 - ey1) < 20:
-                                    is_dup = True
-                                    break
+                            # Check for duplicates
+                            is_dup = any(
+                                abs(ox1 - ed.bbox[0]) < 18 and abs(oy1 - ed.bbox[1]) < 18
+                                for ed in handheld_dets
+                            )
 
                             if not is_dup:
                                 handheld_dets.append(
                                     Detection(
                                         class_id=88,
                                         class_name="stone",
-                                        confidence=0.88,
+                                        confidence=0.91,
                                         bbox=[round(ox1, 2), round(oy1, 2), round(ox2, 2), round(oy2, 2)],
                                         camera_id=camera_id,
                                         timestamp=timestamp,
                                         frame_id=frame_id
                                     )
                                 )
-                                break  # One primary handheld object per hand
+                                break  # One candidate per ROI
 
         return handheld_dets
 

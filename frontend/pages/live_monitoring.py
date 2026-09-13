@@ -607,6 +607,16 @@ if start_clicked and selected_file_path:
                         seen_entities[ent_key]["last_frame"] = frame_idx
                         seen_entities[ent_key]["frames_seen"] += 1
 
+                # Dynamically sync direction & zone from context engine
+                if getattr(pipeline, "last_context_events", None):
+                    for ce in pipeline.last_context_events:
+                        c_key = f"{ce.class_name}_{ce.track_id}"
+                        if c_key in seen_entities:
+                            dir_str = str(getattr(ce, "direction", "TOWARD_BOUNDARY")).replace("DirectionEnum.", "")
+                            seen_entities[c_key]["direction"] = dir_str
+                            if getattr(ce, "zone_name", None):
+                                seen_entities[c_key]["zone"] = ce.zone_name
+
 
 
                 if getattr(pipeline, "last_reliability", None):
@@ -732,10 +742,10 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
 
     # Dynamic metrics computation for AI Analysis Summary & Assessment
     seen_dict: Dict[str, Dict[str, Any]] = s.get("seen_entities", {})
-    alert_obj = s["alerts_list"][0] if s.get("alerts_list") else None
+    alert_obj = max(s.get("alerts_list", []), key=lambda a: a.get("priority_score", 0.0)) if s.get("alerts_list") else None
 
     # Track & entity counts
-    non_fence_entities = [e for e in seen_dict.values() if str(e.get("track_id")) != "PERIMETER"]
+    non_fence_entities = [e for e in seen_dict.values() if str(e.get("track_id")) != "PERIMETER" and str(e.get("class_name")) != "fence"]
     person_entities = [e for e in non_fence_entities if "person" in e.get("class_name", "").lower()]
     person_count = len(person_entities) if person_entities else (len(non_fence_entities) if non_fence_entities else (1 if s.get("raw_detections_count", 0) > 0 else 0))
     active_tracks_count = len(non_fence_entities) if non_fence_entities else (1 if person_count > 0 else 0)
@@ -754,7 +764,7 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
     direction_desc = "Moving toward boundary"
     if non_fence_entities:
         dirs = [e.get("direction", "TOWARD_BOUNDARY") for e in non_fence_entities]
-        if "TOWARD_BOUNDARY" in dirs:
+        if "TOWARD_BOUNDARY" in dirs or any("toward" in r.lower() or "frontal" in r.lower() for r in (alert_obj.get("why_reasons", []) if alert_obj else [])):
             direction_desc = "Moving toward boundary"
         elif "LATERAL" in dirs:
             direction_desc = "Lateral traversal along boundary"
