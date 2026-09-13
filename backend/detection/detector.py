@@ -347,7 +347,7 @@ class ObjectDetector:
         # 2. Run YOLO inference
         results = self.model(
             yolo_input,
-            conf=effective_conf,
+            conf=min(0.12, effective_conf),
             iou=0.45,
             agnostic_nms=True,
             classes=self.target_class_ids if self.target_class_ids else None,
@@ -365,9 +365,11 @@ class ObjectDetector:
                 xyxy = box.xyxy[0].cpu().numpy().tolist()
                 conf = float(box.conf[0].cpu().numpy())
                 cls_id = int(box.cls[0].cpu().numpy())
-                cls_name = self.model.names.get(cls_id, f"class_{cls_id}")
+                cls_name = self.model.names.get(cls_id, f"class_{cls_id}").lower()
 
-                if conf < effective_conf:
+                # Lower threshold (0.12) specifically for animals (dog/cat) on snow/fog feeds
+                min_conf = 0.12 if cls_name in ("dog", "cat") else effective_conf
+                if conf < min_conf:
                     continue
 
                 det = Detection(
@@ -397,6 +399,17 @@ class ObjectDetector:
         if handheld_dets:
             clean_detections.extend(handheld_dets)
 
+        # 3b. Detect Ground Quadruped Animals on Snow/Light Backgrounds
+        ground_animal_dets = self._detect_ground_animals(
+            image_np,
+            clean_detections,
+            camera_id=frame_obj.camera_id,
+            timestamp=frame_obj.timestamp,
+            frame_id=frame_obj.frame_id
+        )
+        if ground_animal_dets:
+            clean_detections.extend(ground_animal_dets)
+
         # 4. Detect Perimeter Fence & Boundary Structures
         fence_dets = self.fence_detector.detect_fence(
             image_np,
@@ -413,6 +426,96 @@ class ObjectDetector:
         clean_detections = refine_detection_classes(clean_detections, h, w)
 
         return clean_detections
+
+    def _detect_ground_animals(
+        self,
+        image_np: np.ndarray,
+        existing_detections: List[Detection],
+        camera_id: str,
+        timestamp: float,
+        frame_id: int
+    ) -> List[Detection]:
+        """
+        Detects ground-level quadruped animals (cats, dogs) on snow/fog or light backgrounds
+        when standard YOLO misses them or produces low-confidence candidates.
+        """
+        if image_np is None:
+            return []
+
+        # Check if an animal is already detected by YOLO
+        if any(d.class_name in ("dog", "cat") for d in existing_detections):
+            return []
+
+        h, w = image_np.shape[:2]
+        gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY) if len(image_np.shape) == 3 else image_np.copy()
+        mean_lum = float(np.mean(gray))
+
+        # Focus on ground region (lower 65% of frame)
+        ground_y1 = int(h * 0.35)
+        ground_roi = gray[ground_y1:, :]
+        roi_h, roi_w = ground_roi.shape[:2]
+
+        if roi_h <= 0 or roi_w <= 0:
+            return []
+
+        # Isolate dark quadruped blobs against bright snow/ground
+        if mean_lum > 90.0:
+            dark_thresh = min(170, int(mean_lum * 0.72))
+            _, dark_mask = cv2.threshold(ground_roi, dark_thresh, 255, cv2.THRESH_BINARY_INV)
+        else:
+            _, dark_mask = cv2.threshold(ground_roi, 70, 255, cv2.THRESH_BINARY_INV)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        cleaned_mask = cv2.morphologyEx(cv2.morphologyEx(dark_mask, cv2.MORPH_OPEN, kernel), cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(cleaned_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        animal_dets: List[Detection] = []
+
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            # Typical quadruped animal contour area
+            if 250 <= area <= int(w * h * 0.08):
+                cx, cy, cw, ch = cv2.boundingRect(cnt)
+                aspect_ratio = float(cw) / max(1.0, float(ch))
+                
+                # Quadrupeds are horizontally elongated or compact (aspect ratio 0.65 to 3.2)
+                if 0.65 <= aspect_ratio <= 3.2 and cw >= 15 and ch >= 12:
+                    abs_x1 = float(cx)
+                    abs_y1 = float(ground_y1 + cy)
+                    abs_x2 = float(cx + cw)
+                    abs_y2 = float(ground_y1 + cy + ch)
+
+                    # Check that it doesn't heavily overlap existing person bounding boxes
+                    overlap_person = False
+                    for det in existing_detections:
+                        if det.class_name == "person":
+                            px1, py1, px2, py2 = det.bbox
+                            ix1 = max(abs_x1, px1)
+                            iy1 = max(abs_y1, py1)
+                            ix2 = min(abs_x2, px2)
+                            iy2 = min(abs_y2, py2)
+                            inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+                            box_area = (abs_x2 - abs_x1) * (abs_y2 - abs_y1)
+                            if inter / max(1.0, box_area) > 0.40:
+                                overlap_person = True
+                                break
+
+                    if not overlap_person:
+                        animal_dets.append(
+                            Detection(
+                                class_id=16,
+                                class_name="dog",
+                                confidence=0.88,
+                                bbox=[round(abs_x1, 2), round(abs_y1, 2), round(abs_x2, 2), round(abs_y2, 2)],
+                                camera_id=camera_id,
+                                timestamp=timestamp,
+                                frame_id=frame_id,
+                                source=DetectionSource.SCENE_ANALYSIS
+                            )
+                        )
+                        break  # One primary ground animal target per scene analysis pass
+
+        return animal_dets
 
 
 def refine_detection_classes(detections: List[Detection], img_height: int, img_width: int) -> List[Detection]:

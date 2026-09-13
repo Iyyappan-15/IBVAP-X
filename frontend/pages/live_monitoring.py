@@ -71,7 +71,7 @@ st.set_page_config(
 )
 
 try:
-    cleanup_old_uploads(settings.VIDEO_TEMP_DIR)
+    cleanup_old_uploads(getattr(settings, "VIDEO_TEMP_DIR", "data/uploads_temp"))
 except Exception:
     pass
 
@@ -249,16 +249,20 @@ else:
 # INPUT-TYPE HANDLING & RESOLUTION
 # ─────────────────────────────────────────────────────────────────────────────
 selected_file_path: Optional[str] = None
-camera_id: str = settings.UPLOAD_CAMERA_ID
+camera_id: str = getattr(settings, "UPLOAD_CAMERA_ID", "CAM-UPLOAD-01")
 source_label: str = "UPLOADED VIDEO"
 selected_public_cam_dict: Optional[Dict[str, Any]] = None
 
 # ── A. UPLOAD ──
 if "Upload" in input_type:
+    max_mb = getattr(settings, "MAX_UPLOAD_SIZE_MB", 200)
+    max_dur = getattr(settings, "MAX_VIDEO_DURATION_SECONDS", 180)
+    temp_dir = getattr(settings, "VIDEO_TEMP_DIR", "data/uploads_temp")
+
     st.markdown("### 📤 Video Ingestion Channel")
     st.caption(
-        f"Supported: MP4 (H.264), AVI, MOV · Max Size: {settings.MAX_UPLOAD_SIZE_MB} MB · "
-        f"Max Duration: {settings.MAX_VIDEO_DURATION_SECONDS}s"
+        f"Supported: MP4 (H.264), AVI, MOV · Max Size: {max_mb} MB · "
+        f"Max Duration: {max_dur}s"
     )
 
     uploaded_file = st.file_uploader(
@@ -271,8 +275,8 @@ if "Upload" in input_type:
         raw_bytes = uploaded_file.getvalue() if hasattr(uploaded_file, "getvalue") else uploaded_file.read()
         size_mb = len(raw_bytes) / (1024 * 1024)
 
-        if size_mb > settings.MAX_UPLOAD_SIZE_MB:
-            st.error(f"File size ({size_mb:.1f} MB) exceeds maximum limit of {settings.MAX_UPLOAD_SIZE_MB} MB.")
+        if size_mb > max_mb:
+            st.error(f"File size ({size_mb:.1f} MB) exceeds maximum limit of {max_mb} MB.")
         else:
             if not st.session_state.get("ibvapx_temp_path") or not os.path.exists(str(st.session_state.get("ibvapx_temp_path"))):
                 with st.spinner("Ingesting and validating video metadata..."):
@@ -280,7 +284,7 @@ if "Upload" in input_type:
                         temp_path = save_upload_to_temp(
                             raw_bytes,
                             uploaded_file.name,
-                            settings.VIDEO_TEMP_DIR,
+                            temp_dir,
                         )
                         st.session_state["ibvapx_temp_path"] = temp_path
                     except Exception as e:
@@ -298,7 +302,7 @@ if "Upload" in input_type:
 
                 if vr.passed:
                     selected_file_path = temp_path
-                    camera_id = settings.UPLOAD_CAMERA_ID
+                    camera_id = getattr(settings, "UPLOAD_CAMERA_ID", "CAM-UPLOAD-01")
                     source_label = "UPLOADED VIDEO FILE"
 
                     st.success("✅ Video validated successfully. Ready for intelligence analysis.")
@@ -324,9 +328,10 @@ elif "Public CCTV" in input_type:
     )
 
     public_cameras = []
-    if os.path.exists(settings.PUBLIC_CAMERAS_CONFIG_PATH):
+    pub_cfg_path = getattr(settings, "PUBLIC_CAMERAS_CONFIG_PATH", "data/config/public_cameras.json")
+    if os.path.exists(pub_cfg_path):
         try:
-            with open(settings.PUBLIC_CAMERAS_CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(pub_cfg_path, "r", encoding="utf-8") as f:
                 public_cameras = json.load(f).get("public_cameras", [])
         except Exception as e:
             logger.warning(f"Could not load public cameras config: {e}")
@@ -698,7 +703,9 @@ if start_clicked and selected_file_path:
                     rel_status_val = getattr(rel_obj.status, "value", str(rel_obj.status))
                     rel_badge = str(rel_status_val).replace("CameraStatus.", "").replace("CAMERASTATUS.", "")
                 else:
-                    rel_badge = "GOOD" if last_reliability_pct >= settings.RELIABILITY_GOOD_THRESHOLD else ("DEGRADED" if last_reliability_pct >= settings.RELIABILITY_DEGRADED_THRESHOLD else "POOR")
+                    rel_good = getattr(settings, "RELIABILITY_GOOD_THRESHOLD", 80.0)
+                    rel_deg = getattr(settings, "RELIABILITY_DEGRADED_THRESHOLD", 50.0)
+                    rel_badge = "GOOD" if last_reliability_pct >= rel_good else ("DEGRADED" if last_reliability_pct >= rel_deg else "POOR")
 
                 stat_rel.metric("Camera Reliability", f"{last_reliability_pct:.0f}% [{rel_badge}]")
 
@@ -808,9 +815,11 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
     prio_label = alert_obj["priority"] if alert_obj else "LOW"
     prio_score = alert_obj["priority_score"] if alert_obj else 0.0
     rel_pct = s.get("reliability_pct", 94.0)
+    rel_good_th = getattr(settings, "RELIABILITY_GOOD_THRESHOLD", 80.0)
+    rel_deg_th = getattr(settings, "RELIABILITY_DEGRADED_THRESHOLD", 50.0)
     rel_status = (
-        "GOOD" if rel_pct >= settings.RELIABILITY_GOOD_THRESHOLD
-        else "DEGRADED" if rel_pct >= settings.RELIABILITY_DEGRADED_THRESHOLD
+        "GOOD" if rel_pct >= rel_good_th
+        else "DEGRADED" if rel_pct >= rel_deg_th
         else "POOR"
     )
     act_rating = alert_obj["actionability"] if alert_obj else "LOW"

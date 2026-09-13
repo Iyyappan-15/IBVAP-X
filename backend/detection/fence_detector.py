@@ -148,7 +148,14 @@ class FenceDetector:
             if (fx2 - fx1) < int(w * 0.15):
                 return []
 
-            logger.info(f"[FenceDetector] Fence confirmed: [{fx1}, {fy1}, {fx2}, {fy2}] (Clusters: {len(clusters)}, Diags: {diag_count})")
+            # Require minimum edge mesh density and diagonal cross-hatching to reject open snow/trees
+            candidate_roi_edges = edges[:, fx1:fx2]
+            edge_density = float(np.count_nonzero(candidate_roi_edges)) / float(max(1, candidate_roi_edges.size))
+            if edge_density < 0.035 or diag_count < 12:
+                logger.debug(f"[FenceDetector] Rejected candidate: edge_density={edge_density:.4f}, diags={diag_count}")
+                return []
+
+            logger.info(f"[FenceDetector] Fence confirmed: [{fx1}, {fy1}, {fx2}, {fy2}] (Clusters: {len(clusters)}, Diags: {diag_count}, EdgeDensity: {edge_density:.4f})")
 
             return [Detection(
                 class_id=91,
