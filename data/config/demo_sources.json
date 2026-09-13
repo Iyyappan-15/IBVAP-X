@@ -1,0 +1,28 @@
+{
+  "demo_sources": [
+    {
+      "source_id": "DEMO-01",
+      "name": "Scenario 1: Real-World Night Perimeter Surveillance (Fence & Intruder)",
+      "file_path": "data/demo/cctv_night_patrol.mp4",
+      "description": "Night infrared optical perimeter feed monitoring physical fence barrier integrity and moving intruder trajectories."
+    },
+    {
+      "source_id": "DEMO-02",
+      "name": "Scenario 2: Normal Patrol Activity (CAM-01)",
+      "file_path": "data/demo/test_normal.mp4",
+      "description": "Routine day patrol along northern boundary line."
+    },
+    {
+      "source_id": "DEMO-03",
+      "name": "Scenario 3: Restricted Zone Entry (CAM-02)",
+      "file_path": "data/demo/test_zone.mp4",
+      "description": "Restricted buffer zone approach and loitering evaluation."
+    },
+    {
+      "source_id": "DEMO-04",
+      "name": "Scenario 4: Degraded Camera Feed (CAM-03)",
+      "file_path": "data/demo/test_degraded.mp4",
+      "description": "Simulated optical blur and underexposure for reliability score evaluation."
+    }
+  ]
+}

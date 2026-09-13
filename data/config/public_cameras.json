@@ -1,0 +1,49 @@
+{
+  "public_cameras": [
+    {
+      "camera_id": "PUBLIC-MUX-001",
+      "name": "Public Highway HLS Demonstration Feed",
+      "country": "US",
+      "city": "San Francisco, CA",
+      "latitude": 37.7749,
+      "longitude": -122.4194,
+      "provider": "Public Stream Provider (Mux Test Endpoint)",
+      "source_type": "HLS",
+      "stream_url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+      "webpage_url": "https://test-streams.mux.dev",
+      "usage_mode": "UNKNOWN",
+      "attribution": "Publicly accessible HLS demonstration video stream",
+      "enabled": true
+    },
+    {
+      "camera_id": "PUBLIC-SNAP-002",
+      "name": "Public Traffic Snapshot Sentinel",
+      "country": "US",
+      "city": "Jackson Hole, Wyoming",
+      "latitude": 43.4799,
+      "longitude": -110.7624,
+      "provider": "Public Traffic Monitoring Network",
+      "source_type": "SNAPSHOT",
+      "stream_url": "https://raw.githubusercontent.com/opencv/opencv/master/samples/data/lena.jpg",
+      "webpage_url": "https://opencv.org",
+      "usage_mode": "UNKNOWN",
+      "attribution": "Public traffic monitoring image snapshot",
+      "enabled": true
+    },
+    {
+      "camera_id": "PUBLIC-VIEW-003",
+      "name": "Tokyo Shibuya Scramble Public Feed",
+      "country": "JP",
+      "city": "Tokyo",
+      "latitude": 35.6595,
+      "longitude": 139.7005,
+      "provider": "Shibuya Public Live Web Stream",
+      "source_type": "VIEW_ONLY",
+      "stream_url": "",
+      "webpage_url": "https://www.youtube.com/watch?v=h3fUg967WrI",
+      "usage_mode": "UNKNOWN",
+      "attribution": "Public webpage view-only stream",
+      "enabled": true
+    }
+  ]
+}

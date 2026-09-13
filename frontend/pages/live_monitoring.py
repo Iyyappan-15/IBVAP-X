@@ -35,6 +35,7 @@ from backend.detection.video_stream import (
     RTSPVideoSource,
     WebcamVideoSource,
 )
+from backend.detection.public_camera import PublicCameraSource
 from backend.pipeline import IBVAPXPipeline
 from backend.interfaces import (
     EventPriority,
@@ -100,6 +101,7 @@ input_type = st.sidebar.radio(
     "Source Channel",
     [
         "📤 Upload Video File",
+        "🎬 Demo Scenario Video",
         "🌍 Public CCTV Feeds",
         "📷 Webcam Device",
         "🌐 Custom RTSP Stream",
@@ -141,6 +143,7 @@ demo_degraded = st.sidebar.checkbox(
 selected_file_path: Optional[str] = None
 camera_id: str = settings.UPLOAD_CAMERA_ID
 source_label: str = "UPLOADED VIDEO"
+selected_public_cam_dict: Optional[Dict[str, Any]] = None
 
 # ── A. UPLOAD ──
 if "Upload" in input_type:
@@ -204,79 +207,102 @@ if "Upload" in input_type:
     else:
         st.info("Awaiting video file upload. Use the selector above or choose a Public CCTV Feed.")
 
-# ── B. PUBLIC CCTV FEEDS (REAL LIVE OPEN-SOURCE STREAMING CAMERAS) ──
-elif "Public CCTV" in input_type:
-    st.markdown("### 🌍 Available Free Public CCTV Live Cameras")
-    st.caption("Live open-source perimeter, traffic, and border surveillance streams from around the world.")
+# ── B. DEMO SCENARIO VIDEO ──
+elif "Demo Scenario" in input_type:
+    st.markdown("### 🎬 Offline Demo Scenario Videos")
+    st.caption("Pre-configured surveillance scenario recordings for evaluation and benchmarking.")
 
-    cctv_registry = {
-        "🇯🇵 CAM-TOKYO-01 · Tokyo Shibuya Scramble Stream (Japan)": {
-            "camera_id": "CAM-TOKYO-01",
-            "name": "Tokyo Shibuya Scramble Urban Crossing Sentinel",
-            "location": "Shibuya, Tokyo, Japan 🇯🇵",
-            "coordinates": "35.6595° N, 139.7005° E",
-            "sector": "Sector Asia-East · Urban Zone 1",
-            "feed_type": "High-Density Pedestrian & Traffic Crossing",
-            "path": "https://raw.githubusercontent.com/intel-iot-devkit/sample-videos/master/person-bicycle-car-detection.mp4",
-            "desc": "Real-world urban surveillance monitoring high-density multi-directional pedestrian crossings and vehicle transit.",
-        },
-        "🇺🇸 CAM-WYOMING-02 · Jackson Hole Town Square Stream (USA)": {
-            "camera_id": "CAM-WYOMING-02",
-            "name": "Jackson Hole Town Square Perimeter Sentinel",
-            "location": "Jackson Hole, Wyoming, United States 🇺🇸",
-            "coordinates": "43.4799° N, 110.7624° W",
-            "sector": "Sector NA-West · Town Square North",
-            "feed_type": "Perimeter Sidewalk & Buffer Zone Access",
-            "path": "https://raw.githubusercontent.com/intel-iot-devkit/sample-videos/master/free-parking.mp4",
-            "desc": "Public perimeter camera monitoring sidewalk trajectories, vehicle access lines, and restricted pedestrian buffer zones.",
-        },
-        "🇬🇧 CAM-DOVER-03 · Port of Dover Border Checkpoint Stream (UK)": {
-            "camera_id": "CAM-DOVER-03",
-            "name": "Port of Dover Maritime & Border Checkpoint",
-            "location": "Port of Dover, Kent, United Kingdom 🇬🇧",
-            "coordinates": "51.1279° N, 1.3134° E",
-            "sector": "Sector EU-West · Maritime Gate 4",
-            "feed_type": "International Border Crossing & Access Control",
-            "path": "https://raw.githubusercontent.com/intel-iot-devkit/sample-videos/master/head-pose-face-detection-female.mp4",
-            "desc": "Maritime border checkpoint monitoring vehicle inspection gates, international freight, and perimeter boundaries.",
-        },
-        "🛡️ CAM-ALPHA-04 · Sector Alpha Night Perimeter Stream (Northern Border)": {
-            "camera_id": "CAM-ALPHA-04",
-            "name": "Sector Alpha Northern Border Fence Sentinel",
-            "location": "Sector Alpha Northern Border Line 🛡️",
-            "coordinates": "31.7683° N, 35.2137° E",
-            "sector": "Sector Alpha · Tower Post 9",
-            "feed_type": "Infrared Night Perimeter Barrier & Intruder Tracking",
-            "path": "https://raw.githubusercontent.com/intel-iot-devkit/sample-videos/master/bottle-detection.mp4",
-            "desc": "Night infrared optical perimeter feed monitoring physical fence barrier integrity and moving intruder trajectories.",
-        },
-    }
+    demo_sources = []
+    if os.path.exists(settings.DEMO_SOURCES_CONFIG_PATH):
+        try:
+            with open(settings.DEMO_SOURCES_CONFIG_PATH, "r", encoding="utf-8") as f:
+                demo_sources = json.load(f).get("demo_sources", [])
+        except Exception as e:
+            logger.warning(f"Could not load demo sources config: {e}")
 
-    selected_cctv_key = st.selectbox("Select Active CCTV Feed", list(cctv_registry.keys()), index=0)
-    cctv_info = cctv_registry[selected_cctv_key]
+    if not demo_sources:
+        demo_sources = [
+            {"source_id": "DEMO-01", "name": "Scenario 1: Real-World Night Perimeter Surveillance", "file_path": "data/demo/cctv_night_patrol.mp4", "description": "Night infrared optical perimeter feed."},
+            {"source_id": "DEMO-02", "name": "Scenario 2: Normal Patrol Activity", "file_path": "data/demo/test_normal.mp4", "description": "Routine day patrol along boundary line."},
+            {"source_id": "DEMO-03", "name": "Scenario 3: Restricted Zone Entry", "file_path": "data/demo/test_zone.mp4", "description": "Restricted buffer zone approach."},
+            {"source_id": "DEMO-04", "name": "Scenario 4: Degraded Camera Feed", "file_path": "data/demo/test_degraded.mp4", "description": "Optical blur and underexposure test."}
+        ]
 
-    selected_file_path = cctv_info["path"]
-    camera_id = cctv_info["camera_id"]
-    source_label = f"PUBLIC CCTV ({cctv_info['location']})"
+    demo_opts = {f"{d['name']} ({d['source_id']})": d for d in demo_sources}
+    selected_demo_key = st.selectbox("Select Scenario Video", list(demo_opts.keys()), index=0)
+    demo_item = demo_opts[selected_demo_key]
 
-    # Display camera origin card
-    cctv_card_html = (
+    selected_file_path = demo_item.get("file_path", "data/demo/cctv_night_patrol.mp4")
+    camera_id = demo_item.get("source_id", "CAM-DEMO-01")
+    source_label = f"DEMO SCENARIO ({demo_item.get('source_id')})"
+
+    st.markdown(
         f'<div style="background: #0f172a; border: 1px solid #1e3a8a; border-left: 4px solid #38bdf8; border-radius: 6px; padding: 12px 16px; margin: 10px 0;">'
-        f'<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">'
-        f'<span style="font-weight: 700; color: #f8fafc; font-size: 14px;">📍 {cctv_info["name"]}</span>'
-        f'<span style="background: #1e293b; color: #4ade80; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-family: monospace;">🟢 LIVE & ONLINE</span>'
-        f'</div>'
-        f'<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12px; font-family: monospace; color: #94a3b8;">'
-        f'<div><b>Origin:</b> <span style="color: #cbd5e1;">{cctv_info["location"]}</span></div>'
-        f'<div><b>GPS:</b> <span style="color: #cbd5e1;">{cctv_info["coordinates"]}</span></div>'
-        f'<div><b>Sector:</b> <span style="color: #cbd5e1;">{cctv_info["sector"]}</span></div>'
-        f'<div><b>Feed Type:</b> <span style="color: #cbd5e1;">{cctv_info["feed_type"]}</span></div>'
-        f'</div>'
-        f'<div style="font-size: 11px; color: #64748b; margin-top: 6px; border-top: 1px solid #1e293b; padding-top: 4px;">'
-        f'ℹ️ {cctv_info["desc"]}'
-        f'</div></div>'
+        f'<div style="font-weight: 700; color: #f8fafc; font-size: 14px; margin-bottom: 4px;">🎬 {demo_item.get("name")}</div>'
+        f'<div style="font-size: 12px; font-family: monospace; color: #94a3b8;">Asset Path: <code>{selected_file_path}</code></div>'
+        f'<div style="font-size: 11px; color: #64748b; margin-top: 4px;">ℹ️ {demo_item.get("description")}</div>'
+        f'</div>',
+        unsafe_allow_html=True
     )
-    st.markdown(cctv_card_html, unsafe_allow_html=True)
+
+# ── C. PUBLIC CCTV FEEDS ──
+elif "Public CCTV" in input_type:
+    st.markdown("### 🌍 Public Camera Streams & Feeds")
+    st.info(
+        "ℹ️ **PUBLIC TEST SOURCE**: Externally published public camera feed used for system demonstration. "
+        "It is not an integrated government or military border surveillance camera."
+    )
+
+    public_cameras = []
+    if os.path.exists(settings.PUBLIC_CAMERAS_CONFIG_PATH):
+        try:
+            with open(settings.PUBLIC_CAMERAS_CONFIG_PATH, "r", encoding="utf-8") as f:
+                public_cameras = json.load(f).get("public_cameras", [])
+        except Exception as e:
+            logger.warning(f"Could not load public cameras config: {e}")
+
+    if public_cameras:
+        cam_opts = {f"{c['name']} ({c['city']}, {c['country']}) [{c['source_type']}]": c for c in public_cameras if c.get("enabled", True)}
+        selected_cam_key = st.selectbox("Select Active Public Feed", list(cam_opts.keys()), index=0)
+        selected_public_cam_dict = cam_opts[selected_cam_key]
+
+        c_info = selected_public_cam_dict
+        st_type = c_info.get("source_type", "SNAPSHOT").upper()
+        cam_id_val = c_info.get("camera_id", "PUBLIC-CAM")
+
+        type_badge_color = "#38bdf8" if st_type in ["HLS", "RTSP", "MJPEG"] else ("#facc15" if st_type == "SNAPSHOT" else "#94a3b8")
+        type_label = f"PUBLIC WEBCAM — {st_type} (Periodic Refresh)" if st_type == "SNAPSHOT" else f"PUBLIC STREAM — {st_type}"
+
+        card_html = (
+            f'<div style="background: #0f172a; border: 1px solid #1e3a8a; border-left: 4px solid {type_badge_color}; border-radius: 6px; padding: 12px 16px; margin: 10px 0;">'
+            f'<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">'
+            f'<span style="font-weight: 700; color: #f8fafc; font-size: 14px;">📍 {c_info.get("name")}</span>'
+            f'<span style="background: #1e293b; color: {type_badge_color}; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-family: monospace;">{st_type}</span>'
+            f'</div>'
+            f'<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12px; font-family: monospace; color: #94a3b8;">'
+            f'<div><b>Provider:</b> <span style="color: #cbd5e1;">{c_info.get("provider", "Unknown")}</span></div>'
+            f'<div><b>Location:</b> <span style="color: #cbd5e1;">{c_info.get("city")}, {c_info.get("country")}</span></div>'
+            f'<div><b>Source Type:</b> <span style="color: #cbd5e1;">{type_label}</span></div>'
+            f'<div><b>Usage Mode:</b> <span style="color: #cbd5e1;">{c_info.get("usage_mode", "UNKNOWN")}</span></div>'
+            f'</div>'
+            f'<div style="font-size: 11px; color: #64748b; margin-top: 6px; border-top: 1px solid #1e293b; padding-top: 4px;">'
+            f'Attribution: {c_info.get("attribution", "")}'
+            f'</div></div>'
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
+
+        if st_type == "VIEW_ONLY":
+            st.warning("🔒 This feed is designated as VIEW_ONLY. Direct streaming access is disabled by provider terms.")
+            web_url = c_info.get("webpage_url", "")
+            if web_url:
+                st.markdown(f"[🌐 Open Provider Webpage in New Tab]({web_url})")
+            selected_file_path = None
+        else:
+            selected_file_path = c_info.get("stream_url", "")
+            camera_id = cam_id_val
+            source_label = f"PUBLIC FEED ({cam_id_val})"
+    else:
+        st.info("No public cameras configured in `data/config/public_cameras.json`.")
 
 # ── D. WEBCAM ──
 elif "Webcam" in input_type:
@@ -291,78 +317,15 @@ elif "RTSP" in input_type:
     st.markdown("### 🌐 RTSP Network & IP Camera Streams")
     st.caption("Connect to standard network RTSP surveillance feeds, IP cameras, or public stream endpoints.")
 
-    rtsp_presets = {
-        "🇯🇵 Tokyo Shibuya Urban Stream (Public RTSP Benchmark)": {
-            "url": "rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4",
-            "fallback": "data/demo/test_normal.mp4",
-            "location": "Shibuya, Tokyo, Japan 🇯🇵",
-            "cam_id": "CAM-RTSP-TOKYO",
-            "coords": "35.6595° N, 139.7005° E",
-        },
-        "🇺🇸 Jackson Hole Town Square Stream (USA)": {
-            "url": "rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4",
-            "fallback": "data/demo/test_zone.mp4",
-            "location": "Jackson Hole, Wyoming, USA 🇺🇸",
-            "cam_id": "CAM-RTSP-WYOMING",
-            "coords": "43.4799° N, 110.7624° W",
-        },
-        "🇬🇧 Port of Dover Checkpoint Stream (UK)": {
-            "url": "rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4",
-            "fallback": "data/demo/test_normal.mp4",
-            "location": "Port of Dover, Kent, United Kingdom 🇬🇧",
-            "cam_id": "CAM-RTSP-DOVER",
-            "coords": "51.1279° N, 1.3134° E",
-        },
-        "🛡️ Sector Alpha Night Sentinel Stream": {
-            "url": "data/demo/cctv_night_patrol.mp4",
-            "fallback": "data/demo/cctv_night_patrol.mp4",
-            "location": "Sector Alpha Border Line 🛡️",
-            "cam_id": "CAM-RTSP-ALPHA",
-            "coords": "31.7683° N, 35.2137° E",
-        },
-        "🔧 Custom IP Camera RTSP URL": {
-            "url": "",
-            "fallback": "",
-            "location": "Custom Network Location",
-            "cam_id": "CAM-RTSP-CUSTOM",
-            "coords": "User Specified",
-        },
-    }
-
-    selected_preset_key = st.selectbox("Preset / Custom Stream Channel", list(rtsp_presets.keys()))
-    preset_data = rtsp_presets[selected_preset_key]
-
-    if selected_preset_key == "🔧 Custom IP Camera RTSP URL":
-        rtsp_input = st.text_input("Enter RTSP Stream URL (e.g., rtsp://admin:pass@192.168.1.100:554/stream1)", value="")
-        custom_loc = st.text_input("Camera Location / Sector Name", value="Perimeter Sector Custom")
-        if rtsp_input:
-            selected_file_path = rtsp_input
-            camera_id = "CAM-RTSP-CUSTOM"
-            source_label = f"CUSTOM RTSP ({custom_loc})"
-            st.success(f"Configured custom stream target: `{rtsp_input}`")
-        else:
-            st.info("Enter a valid RTSP connection URL above.")
+    rtsp_input = st.text_input("Enter RTSP Stream URL (e.g., rtsp://admin:pass@192.168.1.100:554/stream1)", value="")
+    custom_loc = st.text_input("Camera Location / Sector Name", value="Perimeter Sector Custom")
+    if rtsp_input:
+        selected_file_path = rtsp_input
+        camera_id = "CAM-RTSP-CUSTOM"
+        source_label = f"CUSTOM RTSP ({custom_loc})"
+        st.success(f"Configured custom stream target: `{rtsp_input}`")
     else:
-        # Check if local fallback is preferred or direct stream
-        selected_file_path = preset_data["fallback"] if os.path.exists(preset_data["fallback"]) else preset_data["url"]
-        camera_id = preset_data["cam_id"]
-        source_label = f"RTSP STREAM ({preset_data['location']})"
-
-        rtsp_card_html = (
-            f'<div style="background: #0f172a; border: 1px solid #1e3a8a; border-left: 4px solid #38bdf8; border-radius: 6px; padding: 12px 16px; margin: 10px 0;">'
-            f'<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">'
-            f'<span style="font-weight: 700; color: #f8fafc; font-size: 14px;">📍 {selected_preset_key}</span>'
-            f'<span style="background: #1e293b; color: #38bdf8; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-family: monospace;">RTSP READY</span>'
-            f'</div>'
-            f'<div style="font-size: 12px; font-family: monospace; color: #94a3b8;">'
-            f'<b>Origin Location:</b> <span style="color: #cbd5e1;">{preset_data["location"]}</span> &nbsp;|&nbsp; '
-            f'<b>Coordinates:</b> <span style="color: #cbd5e1;">{preset_data["coords"]}</span>'
-            f'</div>'
-            f'<div style="font-size: 11px; color: #64748b; font-family: monospace; margin-top: 4px;">'
-            f'Stream Target: <code>{preset_data["url"]}</code>'
-            f'</div></div>'
-        )
-        st.markdown(rtsp_card_html, unsafe_allow_html=True)
+        st.info("Enter a valid RTSP connection URL above.")
 
 st.markdown("---")
 
@@ -403,7 +366,11 @@ if start_clicked and selected_file_path:
     init_error = None
 
     try:
-        if "RTSP" in input_type:
+        if "Public CCTV" in input_type and selected_public_cam_dict:
+            source = PublicCameraSource(selected_public_cam_dict)
+        elif "Demo Scenario" in input_type:
+            source = DemoVideoSource(file_path=selected_file_path, camera_id=camera_id, demo_name=source_label)
+        elif "RTSP" in input_type:
             source = RTSPVideoSource(rtsp_url=selected_file_path, camera_id=camera_id)
         elif "Webcam" in input_type:
             source = WebcamVideoSource(device_index=0, camera_id=camera_id)

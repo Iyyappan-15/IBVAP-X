@@ -101,6 +101,13 @@ class Settings(BaseSettings):
     UPLOAD_CAMERA_ID: str = "CAM-UPLOAD-01"
     VIDEO_TEMP_DIR: str = "data/uploads_temp"
 
+    # Public Camera & External Stream Settings
+    PUBLIC_CAMERAS_CONFIG_PATH: str = "data/config/public_cameras.json"
+    DEMO_SOURCES_CONFIG_PATH: str = "data/config/demo_sources.json"
+    PUBLIC_CAMERA_RECONNECT_SECONDS: float = 3.0
+    PUBLIC_CAMERA_MAX_RETRIES: int = 3
+    PUBLIC_CAMERA_PROVIDER_API_KEY: str = ""
+
     @property
     def detect_classes_list(self) -> List[str]:
         return [c.strip() for c in self.YOLO_DETECT_CLASSES.split(",") if c.strip()]
