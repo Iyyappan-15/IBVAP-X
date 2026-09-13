@@ -523,7 +523,8 @@ if start_clicked and selected_file_path:
         source_fps = getattr(source, "fps", 25.0)
 
         process_interval = 1 if "100%" in processing_mode else max(1, int(round(source_fps / 10.0)))
-        frame_delay = max(0.01, 1.0 / float(playback_fps))
+        # Enforce minimum 25ms cooperative sleep to yield CPU cycles and prevent cloud throttling
+        frame_delay = max(0.025, 1.0 / float(playback_fps))
 
         frame_idx = 0
         processed_count = 0

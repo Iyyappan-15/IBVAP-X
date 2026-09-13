@@ -104,6 +104,12 @@ class ObjectDetector:
 
         # Detect GPU vs CPU
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        if self.device == "cpu":
+            try:
+                # Limit CPU threads to prevent thread contention & CPU quota throttling on shared cloud instances
+                torch.set_num_threads(2)
+            except Exception:
+                pass
         logger.info(f"[Detector] Initializing YOLO model on device: {self.device}")
 
         from ultralytics import YOLO
