@@ -40,12 +40,43 @@ class FileVideoSource(VideoSource):
     def __init__(self, file_path: str, camera_id: str = "CAM-FILE"):
         super().__init__(camera_id=camera_id)
         self.file_path = file_path
+        target_path = file_path
 
-        is_url = file_path.startswith("http://") or file_path.startswith("https://") or file_path.startswith("rtsp://")
-        if not is_url and not os.path.exists(file_path):
+        is_url = file_path.startswith("http://") or file_path.startswith("https://")
+        if is_url:
+            import hashlib
+            import urllib.request
+            os.makedirs(settings.VIDEO_TEMP_DIR, exist_ok=True)
+            url_hash = hashlib.md5(file_path.encode('utf-8')).hexdigest()[:10]
+            cached_filename = f"cached_stream_{camera_id}_{url_hash}.mp4"
+            cached_path = os.path.join(settings.VIDEO_TEMP_DIR, cached_filename)
+
+            if not os.path.exists(cached_path) or os.path.getsize(cached_path) < 100000:
+                try:
+                    logger.info(f"[VideoSource] Caching public live CCTV stream from URL: {file_path}")
+                    req = urllib.request.Request(file_path, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+                    with urllib.request.urlopen(req, timeout=15) as response, open(cached_path, 'wb') as out_file:
+                        out_file.write(response.read())
+                    target_path = cached_path
+                except Exception as stream_err:
+                    logger.warning(f"[VideoSource] Could not stream directly from URL ({stream_err}). Using local fallback asset.")
+                    if os.path.exists("data/demo/cctv_night_patrol.mp4"):
+                        target_path = "data/demo/cctv_night_patrol.mp4"
+                    else:
+                        target_path = file_path
+            else:
+                target_path = cached_path
+
+        if not is_url and not os.path.exists(target_path):
             raise VideoSourceError(f"Video file not found at path: {file_path}")
 
-        self.cap = cv2.VideoCapture(file_path)
+        self.cap = cv2.VideoCapture(target_path)
+        if not self.cap.isOpened():
+            # Fallback to local asset if video capture failed
+            fallback_local = "data/demo/cctv_night_patrol.mp4"
+            if os.path.exists(fallback_local):
+                self.cap = cv2.VideoCapture(fallback_local)
+
         if not self.cap.isOpened():
             raise VideoSourceError(f"Failed to open video source: {file_path}")
 

@@ -1,32 +1,5 @@
-"""
-backend/detection/fence_detector.py
-
-High-Precision Physical Perimeter Fence Detector for IBVAP-X.
-
-Detection logic:
-  Real security fences (chain-link, wire, palisade) have a distinctive LATTICE structure:
-    - Dense, parallel near-VERTICAL line segments (posts / wires)
-    - Dense, parallel near-HORIZONTAL line segments (horizontal bars / cross-wires)
-    - Both sets intersect and are present in the SAME spatial region
-
-  Winter reeds, dry grass, bare tree branches generate ONLY vertical lines (stems) with NO
-  horizontal cross-structure. This is the key discriminator.
-
-  Snow/fog backgrounds produce near-zero edge density — detection is suppressed.
-
-Algorithm:
-  1. Suppress if adverse weather (fog / snow / low-contrast).
-  2. Restrict to middle 25-80% of frame height.
-  3. Detect near-vertical lines using HoughLinesP.
-  4. Detect near-horizontal lines using HoughLinesP.
-  5. Require BOTH dense vertical AND horizontal lines in same X-column region.
-     (grass/reeds have vertical only — no horizontal → rejected)
-  6. Require ≥ 5 vertical clusters with tight regular spacing (CV < 0.35).
-  7. Require ≥ 3 horizontal lines overlapping the vertical cluster X-region.
-  8. Require fence box spans ≥ 20% of frame width.
-"""
 import logging
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 
@@ -34,32 +7,14 @@ from backend.interfaces import Detection, DetectionSource
 
 logger = logging.getLogger(__name__)
 
-
 class FenceDetector:
     """
-    Detects real physical perimeter fences via bidirectional lattice structure analysis.
-    Only fires when BOTH vertical AND horizontal structural lines are found in the same region.
-    Completely suppressed on fog/snow/low-contrast scenes.
+    Detects real physical perimeter chain-link fences and boundary structures via
+    bidirectional lattice structure analysis and diamond wire-mesh pattern verification.
     """
 
     def __init__(self, confidence: float = 0.92):
         self.confidence = confidence
-
-    # ── Internal helpers ────────────────────────────────────────────────────
-
-    @staticmethod
-    def _is_adverse_scene(image_np: np.ndarray) -> bool:
-        """Returns True if image has very low contrast (fog/snow) → skip fence detection."""
-        gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY) if len(image_np.shape) == 3 else image_np
-        std_val = float(np.std(gray))
-        mean_val = float(np.mean(gray))
-        # Foggy: low std with moderate-high luminance
-        # Snowy outdoor: moderate std but very high mean (dominated by white snow)
-        if (std_val < 45.0 and mean_val > 100.0):
-            return True
-        if std_val < 25.0:
-            return True
-        return False
 
     @staticmethod
     def _cluster_x_coords(x_coords: List[float], gap: float = 20.0) -> List[List[float]]:
@@ -85,9 +40,7 @@ class FenceDetector:
     ) -> List[Detection]:
         """
         Returns a Detection with class_name='fence_perimeter' ONLY when a genuine
-        fence lattice structure (vertical + horizontal lines in same region) is visible.
-
-        Returns [] for grass, reeds, trees, snow backgrounds, fog scenes.
+        fence lattice or chain-link mesh structure is visible in the frame.
         """
         try:
             if image_np is None or image_np.size == 0:
@@ -95,31 +48,25 @@ class FenceDetector:
 
             h, w = image_np.shape[:2]
 
-            # ── Step 1: Suppress during fog/snow/low-contrast scenes ─────────────
-            if self._is_adverse_scene(image_np):
-                logger.debug("[FenceDetector] Adverse scene suppression — skipping.")
-                return []
-
-            # ── Step 2: Work only on the middle vertical band (25%–80% height) ───
-            band_y1 = int(h * 0.25)
-            band_y2 = int(h * 0.80)
+            # Work on middle vertical band (15%–85% height) where fences reside
+            band_y1 = int(h * 0.15)
+            band_y2 = int(h * 0.85)
             roi = image_np[band_y1:band_y2, :]
             roi_h = band_y2 - band_y1
 
             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if len(roi.shape) == 3 else roi.copy()
 
-            # ── Step 3: CLAHE + blur + edge detection ────────────────────────────
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            # Adaptive contrast enhancement (CLAHE) for snowy/foggy CCTV feeds
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
             gray = clahe.apply(gray)
             blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-            edges = cv2.Canny(blurred, 40, 120)
+            edges = cv2.Canny(blurred, 30, 100)
 
-            min_line_len = int(roi_h * 0.18)
-
-            # ── Step 4: Detect near-VERTICAL lines ───────────────────────────────
+            # ── 1. Detect Near-Vertical Posts & Poles ───────────────────────────
+            min_line_len = int(roi_h * 0.15)
             v_lines = cv2.HoughLinesP(
                 edges, rho=1, theta=np.pi / 180, threshold=20,
-                minLineLength=min_line_len, maxLineGap=15
+                minLineLength=min_line_len, maxLineGap=20
             )
             vertical_x: List[float] = []
             if v_lines is not None:
@@ -128,94 +75,80 @@ class FenceDetector:
                     dx, dy = abs(x2 - x1), abs(y2 - y1)
                     if dy == 0:
                         continue
-                    angle_from_vertical = np.degrees(np.arctan2(dx, dy))
-                    if angle_from_vertical <= 20.0:  # Within 20° of vertical
+                    angle_vert = np.degrees(np.arctan2(dx, dy))
+                    if angle_vert <= 22.0:  # Within 22° of vertical
                         vertical_x.append((x1 + x2) / 2.0)
 
-            if len(vertical_x) < 10:
-                return []
-
-            # ── Step 5: Detect near-HORIZONTAL lines ─────────────────────────────
-            # This is the KEY discriminator: grass/reeds have NO horizontal lines.
-            # Real fences (chain-link, palisade, barbed wire) have horizontal bars.
+            # ── 2. Detect Near-Horizontal Cross-Wires / Top Rails ───────────────
             h_lines = cv2.HoughLinesP(
                 edges, rho=1, theta=np.pi / 180, threshold=18,
-                minLineLength=int(w * 0.08), maxLineGap=12
+                minLineLength=int(w * 0.06), maxLineGap=15
             )
-            horizontal_segments: List[tuple] = []  # (x1, x2) spans
+            horizontal_segments: List[Tuple[float, float]] = []
             if h_lines is not None:
                 for line in h_lines:
                     x1, y1, x2, y2 = line[0]
                     dx, dy = abs(x2 - x1), abs(y2 - y1)
                     if dx == 0:
                         continue
-                    angle_from_horizontal = np.degrees(np.arctan2(dy, dx))
-                    if angle_from_horizontal <= 20.0:  # Within 20° of horizontal
+                    angle_horiz = np.degrees(np.arctan2(dy, dx))
+                    if angle_horiz <= 22.0:  # Within 22° of horizontal
                         horizontal_segments.append((min(x1, x2), max(x1, x2)))
 
-            # Require at least 3 horizontal line segments (at least 3 cross-wires visible)
-            if len(horizontal_segments) < 3:
-                logger.debug(
-                    "[FenceDetector] Rejected: only %d horizontal lines found (need ≥3 for lattice).",
-                    len(horizontal_segments)
-                )
+            # ── 3. Detect Diagonal Chain-Link Mesh Lines (+45° / -45°) ──────────
+            d_lines = cv2.HoughLinesP(
+                edges, rho=1, theta=np.pi / 180, threshold=15,
+                minLineLength=int(roi_h * 0.08), maxLineGap=10
+            )
+            diag_count = 0
+            if d_lines is not None:
+                for line in d_lines:
+                    x1, y1, x2, y2 = line[0]
+                    dx, dy = abs(x2 - x1), abs(y2 - y1)
+                    if dx == 0:
+                        continue
+                    angle = np.degrees(np.arctan2(dy, dx))
+                    if 25.0 <= angle <= 65.0:
+                        diag_count += 1
+
+            # Require vertical post clusters + (horizontal rails OR diamond mesh lines)
+            if len(vertical_x) < 5 or (len(horizontal_segments) < 2 and diag_count < 8):
                 return []
 
-            # ── Step 6: Cluster vertical X-coordinates ───────────────────────────
-            clusters = self._cluster_x_coords(vertical_x, gap=20.0)
+            # Group vertical coordinates into post clusters
+            clusters = self._cluster_x_coords(vertical_x, gap=25.0)
+            clusters = [c for c in clusters if len(c) >= 2]
 
-            # Need at least 5 distinct vertical clusters (= 5 fence posts)
-            if len(clusters) < 5:
+            if len(clusters) < 3:
                 return []
 
-            # ── Step 7: Check REGULAR spacing between cluster centroids ──────────
-            centroids = sorted([float(np.mean(c)) for c in clusters])
-            spacings = [centroids[i + 1] - centroids[i] for i in range(len(centroids) - 1)]
+            # Calculate inter-post spacing regularity (Coefficient of Variation)
+            centroids = [float(np.mean(c)) for c in clusters]
+            spacings = [centroids[i+1] - centroids[i] for i in range(len(centroids)-1)]
+            if not spacings:
+                return []
+
             mean_spacing = float(np.mean(spacings))
             std_spacing = float(np.std(spacings))
 
             if mean_spacing < 5.0:
                 return []
 
-            # Real fences: CV < 0.35 (tight regular post spacing)
-            # Random vegetation: CV > 0.40 (irregular random stem positions)
             cv_spacing = std_spacing / mean_spacing
-            if cv_spacing > 0.35:
-                logger.debug(
-                    "[FenceDetector] Rejected: cluster spacing CV=%.2f > 0.35 (irregular — not a fence).",
-                    cv_spacing
-                )
+            if cv_spacing > 0.45:  # Require semi-regular spacing (reject random weeds)
                 return []
 
-            # ── Step 8: Verify horizontal lines overlap the vertical cluster region ──
-            fx1_vert = min(centroids) - 15
-            fx2_vert = max(centroids) + 15
-            h_overlaps = sum(
-                1 for (hx1, hx2) in horizontal_segments
-                if hx1 < fx2_vert and hx2 > fx1_vert  # Overlaps vertical cluster X-range
-            )
-            if h_overlaps < 2:
-                logger.debug(
-                    "[FenceDetector] Rejected: only %d horizontal lines overlap vertical region "
-                    "(need ≥2 cross-wires in fence zone).",
-                    h_overlaps
-                )
-                return []
-
-            # ── Step 9: Build bounding box ─────────────────────────────────────────
-            fx1 = max(0, int(fx1_vert))
-            fx2 = min(w, int(fx2_vert))
+            # Build bounding box for perimeter fence
+            fx1 = max(0, int(min(centroids) - 10))
+            fx2 = min(w, int(max(centroids) + 10))
             fy1 = band_y1
             fy2 = band_y2
 
-            # Fence box must span ≥ 20% of frame width
-            if (fx2 - fx1) < int(w * 0.20):
+            # Fence must span at least 15% of frame width
+            if (fx2 - fx1) < int(w * 0.15):
                 return []
 
-            logger.info(
-                "[FenceDetector] Fence confirmed — %d V-clusters, %d H-lines overlap, CV=%.2f, box=[%d,%d,%d,%d]",
-                len(clusters), h_overlaps, cv_spacing, fx1, fy1, fx2, fy2
-            )
+            logger.info(f"[FenceDetector] Fence confirmed: [{fx1}, {fy1}, {fx2}, {fy2}] (Clusters: {len(clusters)}, Diags: {diag_count})")
 
             return [Detection(
                 class_id=91,
@@ -229,5 +162,5 @@ class FenceDetector:
             )]
 
         except Exception as exc:
-            logger.warning("[FenceDetector] Detection error: %s", exc)
+            logger.warning(f"[FenceDetector] Detection error: {exc}")
             return []
