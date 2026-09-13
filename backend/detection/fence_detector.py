@@ -95,24 +95,33 @@ class FenceDetector:
                     if angle_horiz <= 22.0:  # Within 22° of horizontal
                         horizontal_segments.append((min(x1, x2), max(x1, x2)))
 
-            # ── 3. Detect Diagonal Chain-Link Mesh Lines (+45° / -45°) ──────────
+            # ── 3. Detect Bidirectional Diamond Mesh Lines (+45° / -45°) ──────────
             d_lines = cv2.HoughLinesP(
                 edges, rho=1, theta=np.pi / 180, threshold=15,
                 minLineLength=int(roi_h * 0.08), maxLineGap=10
             )
-            diag_count = 0
+            diag_pos = 0
+            diag_neg = 0
             if d_lines is not None:
                 for line in d_lines:
                     x1, y1, x2, y2 = line.ravel()
-                    dx, dy = abs(x2 - x1), abs(y2 - y1)
+                    dx, dy = (x2 - x1), (y2 - y1)
                     if dx == 0:
                         continue
-                    angle = np.degrees(np.arctan2(dy, dx))
+                    slope = dy / float(dx)
+                    angle = np.degrees(np.arctan(abs(slope)))
                     if 25.0 <= angle <= 65.0:
-                        diag_count += 1
+                        if slope > 0:
+                            diag_pos += 1
+                        else:
+                            diag_neg += 1
+            diag_count = diag_pos + diag_neg
 
-            # Require vertical post clusters + (horizontal rails OR diamond mesh lines)
-            if len(vertical_x) < 5 or (len(horizontal_segments) < 2 and diag_count < 8):
+            # Genuine perimeter chain-link fence requires bidirectional diamond cross-hatching or multiple rails
+            has_diamond_mesh = (diag_pos >= 12 and diag_neg >= 12 and diag_count >= 28)
+            has_rails = len(horizontal_segments) >= 3
+
+            if len(vertical_x) < 8 or (not has_diamond_mesh and not has_rails):
                 return []
 
             # Group vertical coordinates into post clusters
@@ -131,11 +140,11 @@ class FenceDetector:
             mean_spacing = float(np.mean(spacings))
             std_spacing = float(np.std(spacings))
 
-            if mean_spacing < 5.0:
+            if mean_spacing < 8.0:
                 return []
 
             cv_spacing = std_spacing / mean_spacing
-            if cv_spacing > 0.45:  # Require semi-regular spacing (reject random weeds)
+            if cv_spacing > 0.40:  # Require regular spacing (reject random foliage/trees)
                 return []
 
             # Build bounding box for perimeter fence
@@ -148,14 +157,14 @@ class FenceDetector:
             if (fx2 - fx1) < int(w * 0.15):
                 return []
 
-            # Require minimum edge mesh density and diagonal cross-hatching to reject open snow/trees
+            # Require minimum edge mesh density and cross-hatching to reject open snow/trees/horizons
             candidate_roi_edges = edges[:, fx1:fx2]
             edge_density = float(np.count_nonzero(candidate_roi_edges)) / float(max(1, candidate_roi_edges.size))
-            if edge_density < 0.035 or diag_count < 12:
-                logger.debug(f"[FenceDetector] Rejected candidate: edge_density={edge_density:.4f}, diags={diag_count}")
+            if edge_density < 0.045 or (not has_diamond_mesh and not has_rails):
+                logger.debug(f"[FenceDetector] Rejected candidate: edge_density={edge_density:.4f}, diags={diag_count} (pos={diag_pos}, neg={diag_neg})")
                 return []
 
-            logger.info(f"[FenceDetector] Fence confirmed: [{fx1}, {fy1}, {fx2}, {fy2}] (Clusters: {len(clusters)}, Diags: {diag_count}, EdgeDensity: {edge_density:.4f})")
+            logger.info(f"[FenceDetector] Fence confirmed: [{fx1}, {fy1}, {fx2}, {fy2}] (Clusters: {len(clusters)}, Diags: {diag_count} [pos:{diag_pos}, neg:{diag_neg}], EdgeDensity: {edge_density:.4f})")
 
             return [Detection(
                 class_id=91,

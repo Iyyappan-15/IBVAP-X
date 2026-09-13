@@ -152,6 +152,13 @@ class OpenVocabEngine:
 
                 cls_name = cls_name.lower().strip()
 
+                # Filter out hallucinated open-vocab fence detections across empty fields/horizons
+                if "fence" in cls_name:
+                    b_w = max(1.0, xyxy[2] - xyxy[0])
+                    b_h = max(1.0, xyxy[3] - xyxy[1])
+                    if conf < 0.38 or (b_w * b_h) > 0.40 * (w * h):
+                        continue
+
                 # Experimental unclassified flagging
                 if getattr(settings, "ENABLE_UNCLASSIFIED_FLAGGING", False) and conf < 0.20:
                     cls_name = "UNCLASSIFIED — REVIEW"

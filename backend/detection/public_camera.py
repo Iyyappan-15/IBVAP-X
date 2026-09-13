@@ -52,8 +52,8 @@ class PublicCameraSource(VideoSource):
         self.height = 480
         self.total_frames = 999999
         self.retries = 0
-        self.max_retries = settings.PUBLIC_CAMERA_MAX_RETRIES
-        self.reconnect_delay = settings.PUBLIC_CAMERA_RECONNECT_SECONDS
+        self.max_retries = getattr(settings, "PUBLIC_CAMERA_MAX_RETRIES", 3)
+        self.reconnect_delay = getattr(settings, "PUBLIC_CAMERA_RECONNECT_SECONDS", 3.0)
 
         self.cap: Optional[cv2.VideoCapture] = None
         self._last_snapshot_bytes: Optional[bytes] = None
@@ -113,11 +113,12 @@ class PublicCameraSource(VideoSource):
     def _try_url_cache_fallback(self):
         if self.stream_url.startswith("http://") or self.stream_url.startswith("https://"):
             try:
-                os.makedirs(settings.VIDEO_TEMP_DIR, exist_ok=True)
+                temp_dir = getattr(settings, "VIDEO_TEMP_DIR", "data/uploads_temp")
+                os.makedirs(temp_dir, exist_ok=True)
                 url_hash = hashlib.md5(self.stream_url.encode("utf-8")).hexdigest()[:10]
                 ext = ".m3u8" if ".m3u8" in self.stream_url else ".mp4"
                 cached_path = os.path.join(
-                    settings.VIDEO_TEMP_DIR, f"public_stream_{self.camera_id}_{url_hash}{ext}"
+                    temp_dir, f"public_stream_{self.camera_id}_{url_hash}{ext}"
                 )
 
                 if not os.path.exists(cached_path) or os.path.getsize(cached_path) < 1000:

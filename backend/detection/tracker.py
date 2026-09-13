@@ -354,6 +354,54 @@ class ObjectTracker:
             tdata["label_stability"] = "LOW"
 
     def _build_track_outputs(self) -> List[Track]:
+        # Track-Level Containment Suppression: Evict nested partial sub-boxes (e.g. torso/arm inside full body)
+        active_items = list(self.active_tracks.items())
+
+        def box_area(b):
+            return max(0.0, float(b[2] - b[0])) * max(0.0, float(b[3] - b[1]))
+
+        # Sort by box area descending so larger bounding boxes take precedence
+        active_items.sort(key=lambda item: box_area(item[1]["bbox"]), reverse=True)
+        suppressed_ids = set()
+
+        for i, (tid_b, data_b) in enumerate(active_items):
+            if tid_b in suppressed_ids:
+                continue
+            box_b = data_b["bbox"]
+            area_b = box_area(box_b)
+            if area_b <= 0:
+                continue
+
+            for j in range(i):
+                tid_a, data_a = active_items[j]
+                if tid_a in suppressed_ids:
+                    continue
+
+                # Containment check for same class (especially person)
+                if data_a["class_name"] != data_b["class_name"]:
+                    continue
+
+                box_a = data_a["bbox"]
+                area_a = box_area(box_a)
+                if area_a <= area_b:
+                    continue
+
+                ix1 = max(box_a[0], box_b[0])
+                iy1 = max(box_a[1], box_b[1])
+                ix2 = min(box_a[2], box_b[2])
+                iy2 = min(box_a[3], box_b[3])
+                inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+                containment = inter / area_b
+
+                # If box B is 35%+ contained inside larger box A of same class, evict B
+                if containment >= 0.35:
+                    suppressed_ids.add(tid_b)
+                    break
+
+        for sid in suppressed_ids:
+            if sid in self.active_tracks:
+                del self.active_tracks[sid]
+
         output: List[Track] = []
         for t_id, data in self.active_tracks.items():
             output.append(
@@ -394,6 +442,9 @@ class ObjectTracker:
         CLASS_COLORS = {
             "person": (0, 140, 255),          # Orange
             "car": (255, 180, 0),             # Cyan/Amber
+            "dog": (0, 215, 255),             # Golden Yellow
+            "cat": (0, 235, 255),             # Bright Yellow
+            "bottle": (255, 140, 0),          # Sky Blue
             "fence": (0, 230, 70),            # Bright Neon Green
             "fence_perimeter": (0, 230, 70),  # Bright Neon Green
             "stone": (180, 0, 255),           # Purple/Violet

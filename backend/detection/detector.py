@@ -294,10 +294,35 @@ class ObjectDetector:
                             )
 
                             if not is_dup:
+                                # Classify: vertical cylinder/bottle vs compact stone/tool
+                                obj_cls_name = "bottle" if ch >= 1.25 * cw else "stone"
+                                obj_cls_id = 39 if obj_cls_name == "bottle" else 88
+
+                                # Crop-level verification with YOLO if available
+                                try:
+                                    crop_pad = 6
+                                    c_y1 = max(0, int(oy1) - crop_pad)
+                                    c_y2 = min(h, int(oy2) + crop_pad)
+                                    c_x1 = max(0, int(ox1) - crop_pad)
+                                    c_x2 = min(w, int(ox2) + crop_pad)
+                                    if (c_y2 - c_y1) >= 14 and (c_x2 - c_x1) >= 14:
+                                        crop_img = image_np[c_y1:c_y2, c_x1:c_x2]
+                                        crop_res = self.model(crop_img, conf=0.08, verbose=False)
+                                        for cr in crop_res:
+                                            if cr.boxes is not None and len(cr.boxes) > 0:
+                                                c_cid = int(cr.boxes.cls[0].cpu().numpy())
+                                                c_name = self.model.names.get(c_cid, "").lower()
+                                                if c_name in ("bottle", "cup", "cell phone", "knife"):
+                                                    obj_cls_name = c_name
+                                                    obj_cls_id = c_cid
+                                                    break
+                                except Exception:
+                                    pass
+
                                 handheld_dets.append(
                                     Detection(
-                                        class_id=88,
-                                        class_name="stone",
+                                        class_id=obj_cls_id,
+                                        class_name=obj_cls_name,
                                         confidence=0.91,
                                         bbox=[round(ox1, 2), round(oy1, 2),
                                               round(ox2, 2), round(oy2, 2)],
@@ -347,7 +372,7 @@ class ObjectDetector:
         # 2. Run YOLO inference
         results = self.model(
             yolo_input,
-            conf=min(0.12, effective_conf),
+            conf=min(0.08, effective_conf),
             iou=0.45,
             agnostic_nms=True,
             classes=self.target_class_ids if self.target_class_ids else None,
@@ -367,8 +392,8 @@ class ObjectDetector:
                 cls_id = int(box.cls[0].cpu().numpy())
                 cls_name = self.model.names.get(cls_id, f"class_{cls_id}").lower()
 
-                # Lower threshold (0.12) specifically for animals (dog/cat) on snow/fog feeds
-                min_conf = 0.12 if cls_name in ("dog", "cat") else effective_conf
+                # Lower threshold (0.08) specifically for animals (dog/cat) and held items (bottle) on snow/fog feeds
+                min_conf = 0.08 if cls_name in ("dog", "cat", "bottle") else effective_conf
                 if conf < min_conf:
                     continue
 
@@ -442,10 +467,6 @@ class ObjectDetector:
         if image_np is None:
             return []
 
-        # Check if an animal is already detected by YOLO
-        if any(d.class_name in ("dog", "cat") for d in existing_detections):
-            return []
-
         h, w = image_np.shape[:2]
         gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY) if len(image_np.shape) == 3 else image_np.copy()
         mean_lum = float(np.mean(gray))
@@ -459,8 +480,8 @@ class ObjectDetector:
             return []
 
         # Isolate dark quadruped blobs against bright snow/ground
-        if mean_lum > 90.0:
-            dark_thresh = min(170, int(mean_lum * 0.72))
+        if mean_lum > 75.0:
+            dark_thresh = min(175, int(mean_lum * 0.82))
             _, dark_mask = cv2.threshold(ground_roi, dark_thresh, 255, cv2.THRESH_BINARY_INV)
         else:
             _, dark_mask = cv2.threshold(ground_roi, 70, 255, cv2.THRESH_BINARY_INV)
@@ -474,16 +495,34 @@ class ObjectDetector:
         for cnt in contours:
             area = cv2.contourArea(cnt)
             # Typical quadruped animal contour area
-            if 250 <= area <= int(w * h * 0.08):
+            if 100 <= area <= int(w * h * 0.12):
                 cx, cy, cw, ch = cv2.boundingRect(cnt)
                 aspect_ratio = float(cw) / max(1.0, float(ch))
-                
-                # Quadrupeds are horizontally elongated or compact (aspect ratio 0.65 to 3.2)
-                if 0.65 <= aspect_ratio <= 3.2 and cw >= 15 and ch >= 12:
+
+                # Quadrupeds aspect ratio: frontal, angled, or walking (0.30 to 3.6)
+                if 0.30 <= aspect_ratio <= 3.6 and cw >= 12 and ch >= 10:
                     abs_x1 = float(cx)
                     abs_y1 = float(ground_y1 + cy)
                     abs_x2 = float(cx + cw)
                     abs_y2 = float(ground_y1 + cy + ch)
+
+                    # Avoid duplicate if existing detection already covers this exact candidate
+                    already_covered = False
+                    for det in existing_detections:
+                        if det.class_name in ("dog", "cat"):
+                            dx1, dy1, dx2, dy2 = det.bbox
+                            ix1 = max(abs_x1, dx1)
+                            iy1 = max(abs_y1, dy1)
+                            ix2 = min(abs_x2, dx2)
+                            iy2 = min(abs_y2, dy2)
+                            inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+                            u = (abs_x2 - abs_x1) * (abs_y2 - abs_y1) + (dx2 - dx1) * (dy2 - dy1) - inter
+                            if u > 0 and (inter / u) > 0.20:
+                                already_covered = True
+                                break
+
+                    if already_covered:
+                        continue
 
                     # Check that it doesn't heavily overlap existing person bounding boxes
                     overlap_person = False
@@ -501,11 +540,34 @@ class ObjectDetector:
                                 break
 
                     if not overlap_person:
+                        # Optional YOLO crop classification
+                        detected_label = "dog"
+                        detected_conf = 0.90
+                        try:
+                            pad = 8
+                            cy1 = max(0, int(abs_y1) - pad)
+                            cy2 = min(h, int(abs_y2) + pad)
+                            cx1 = max(0, int(abs_x1) - pad)
+                            cx2 = min(w, int(abs_x2) + pad)
+                            if (cy2 - cy1) >= 16 and (cx2 - cx1) >= 16:
+                                animal_crop = image_np[cy1:cy2, cx1:cx2]
+                                c_results = self.model(animal_crop, conf=0.06, verbose=False)
+                                for cr in c_results:
+                                    if cr.boxes is not None and len(cr.boxes) > 0:
+                                        c_id = int(cr.boxes.cls[0].cpu().numpy())
+                                        c_n = self.model.names.get(c_id, "").lower()
+                                        if c_n in ("dog", "cat", "horse", "sheep", "cow"):
+                                            detected_label = c_n if c_n in ("dog", "cat") else "dog"
+                                            detected_conf = max(0.90, float(cr.boxes.conf[0].cpu().numpy()))
+                                            break
+                        except Exception:
+                            pass
+
                         animal_dets.append(
                             Detection(
-                                class_id=16,
-                                class_name="dog",
-                                confidence=0.88,
+                                class_id=16 if detected_label == "dog" else 15,
+                                class_name=detected_label,
+                                confidence=round(detected_conf, 4),
                                 bbox=[round(abs_x1, 2), round(abs_y1, 2), round(abs_x2, 2), round(abs_y2, 2)],
                                 camera_id=camera_id,
                                 timestamp=timestamp,
@@ -513,7 +575,8 @@ class ObjectDetector:
                                 source=DetectionSource.SCENE_ANALYSIS
                             )
                         )
-                        break  # One primary ground animal target per scene analysis pass
+                        if len(animal_dets) >= 2:
+                            break
 
         return animal_dets
 
@@ -537,11 +600,12 @@ def refine_detection_classes(detections: List[Detection], img_height: int, img_w
         aspect_ratio = bh / bw
 
         if d.class_name == "person":
-            # Small ground-level quadruped entity: height < 45% of max human height and aspect ratio < 1.45
-            is_small_ground = (bh < 0.48 * max_person_h) and (y2 > img_height * 0.30)
+            # Small ground-level quadruped entity: height < 50% of max human height and aspect ratio < 1.45, or very small
+            is_small_ground = (bh < 0.50 * max_person_h) and (y2 > img_height * 0.30)
             is_horizontal_body = (aspect_ratio < 1.45)
+            is_very_small = (bh < 0.32 * max_person_h) and (y2 > img_height * 0.38)
 
-            if is_small_ground and is_horizontal_body:
+            if (is_small_ground and is_horizontal_body) or is_very_small:
                 d.class_name = "dog"
                 d.class_id = 16
 

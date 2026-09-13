@@ -126,8 +126,8 @@ playback_speed_preset = st.sidebar.radio(
         "🏃 Video Speed (10 FPS — 0.1s / frame)",
         "⚡ Fast Preview (20 FPS)",
     ],
-    index=1,
-    help="Select playback speed for comfortable operator inspection. Default is 4 FPS.",
+    index=0,
+    help="Select playback speed for comfortable operator inspection. Default is 1 FPS Step-by-Step.",
 )
 
 if "1 FPS" in playback_speed_preset:
