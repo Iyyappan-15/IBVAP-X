@@ -345,7 +345,17 @@ class ObjectTracker:
         top_class = max(scores.items(), key=lambda x: x[1])
         top_weight_ratio = top_class[1] / total_weight
 
-        tdata["class_name"] = top_class[0]
+        assigned_class = top_class[0]
+
+        # Biomechanical sanity check: A human track standing/walking has height > width (AR >= 1.35)
+        # Ground-level quadruped animals have horizontal/compact proportions (AR <= 1.30)
+        bbox = tdata.get("bbox", [0, 0, 0, 0])
+        tbw = max(1.0, float(bbox[2] - bbox[0]))
+        tbh = max(1.0, float(bbox[3] - bbox[1]))
+        if assigned_class == "person" and (tbh / tbw) <= 1.30 and tbh < 220.0:
+            assigned_class = "dog"
+
+        tdata["class_name"] = assigned_class
         if top_weight_ratio >= 0.70:
             tdata["label_stability"] = "HIGH"
         elif top_weight_ratio >= 0.40:

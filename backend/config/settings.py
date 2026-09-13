@@ -124,4 +124,17 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
+    def __getattr__(self, name: str) -> Any:
+        defaults = {
+            "PUBLIC_CAMERA_MAX_RETRIES": 3,
+            "PUBLIC_CAMERA_RECONNECT_SECONDS": 3.0,
+            "PUBLIC_CAMERAS_CONFIG_PATH": "data/config/public_cameras.json",
+            "DEMO_SOURCES_CONFIG_PATH": "data/config/demo_sources.json",
+            "VIDEO_TEMP_DIR": "data/uploads_temp",
+            "UPLOAD_CAMERA_ID": "CAM-UPLOAD-01",
+        }
+        if name in defaults:
+            return defaults[name]
+        raise AttributeError(f"'Settings' object has no attribute '{name}'")
+
 settings = Settings()

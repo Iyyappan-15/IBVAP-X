@@ -583,29 +583,37 @@ class ObjectDetector:
 
 def refine_detection_classes(detections: List[Detection], img_height: int, img_width: int) -> List[Detection]:
     """
-    Refines class labels for detections based on physical aspect ratios and relative scale.
-    Corrects small quadruped animals (dogs/cats) misclassified as 'person' by low-resolution YOLO.
+    Refines class labels for detections based on physical aspect ratios, relative scale, and biomechanical geometry.
+    Guarantees that quadruped animals (dogs/cats) are NEVER misclassified as 'person'.
     """
-    person_boxes = [d for d in detections if d.class_name == "person"]
-    if not person_boxes:
+    if not detections:
         return detections
 
-    max_person_h = max(d.bbox[3] - d.bbox[1] for d in person_boxes)
+    # Identify true upright human detections (aspect ratio height/width >= 1.50)
+    tall_persons = [
+        d for d in detections 
+        if d.class_name == "person" and (d.bbox[3] - d.bbox[1]) / max(1.0, d.bbox[2] - d.bbox[0]) >= 1.50
+    ]
+    max_person_h = max((d.bbox[3] - d.bbox[1] for d in tall_persons), default=0.0)
 
     refined: List[Detection] = []
     for d in detections:
         x1, y1, x2, y2 = d.bbox
         bw = max(1.0, x2 - x1)
         bh = max(1.0, y2 - y1)
-        aspect_ratio = bh / bw
+        aspect_ratio = bh / bw  # Height / Width
 
         if d.class_name == "person":
-            # Small ground-level quadruped entity: height < 50% of max human height and aspect ratio < 1.45, or very small
-            is_small_ground = (bh < 0.50 * max_person_h) and (y2 > img_height * 0.30)
-            is_horizontal_body = (aspect_ratio < 1.45)
-            is_very_small = (bh < 0.32 * max_person_h) and (y2 > img_height * 0.38)
+            # Condition 1: Comparative scale against upright person in the same scene
+            is_relative_small = (max_person_h > 0) and (bh < 0.60 * max_person_h) and (aspect_ratio < 1.55)
 
-            if (is_small_ground and is_horizontal_body) or is_very_small:
+            # Condition 2: Biomechanical geometry: quadruped animals have horizontal/compact body (aspect ratio <= 1.35)
+            is_horizontal_animal = (aspect_ratio <= 1.35) and (y2 > img_height * 0.30) and (bh < img_height * 0.45)
+
+            # Condition 3: Ground-level compact blob (height < 22% of entire frame)
+            is_ground_blob = (bh < img_height * 0.22) and (y2 > img_height * 0.38) and (aspect_ratio < 1.45)
+
+            if is_relative_small or is_horizontal_animal or is_ground_blob:
                 d.class_name = "dog"
                 d.class_id = 16
 

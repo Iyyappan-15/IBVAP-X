@@ -29,6 +29,25 @@ import numpy as np
 import streamlit as st
 
 from backend.config.settings import settings
+
+# Runtime resilience on Streamlit Cloud against cached session settings
+for attr_name, default_val in [
+    ("PUBLIC_CAMERA_MAX_RETRIES", 3),
+    ("PUBLIC_CAMERA_RECONNECT_SECONDS", 3.0),
+    ("PUBLIC_CAMERAS_CONFIG_PATH", "data/config/public_cameras.json"),
+    ("DEMO_SOURCES_CONFIG_PATH", "data/config/demo_sources.json"),
+    ("VIDEO_TEMP_DIR", "data/uploads_temp"),
+    ("UPLOAD_CAMERA_ID", "CAM-UPLOAD-01"),
+]:
+    if not hasattr(settings, attr_name):
+        try:
+            setattr(settings, attr_name, default_val)
+        except Exception:
+            try:
+                object.__setattr__(settings, attr_name, default_val)
+            except Exception:
+                pass
+
 from backend.detection.video_stream import (
     FileVideoSource,
     DemoVideoSource,
