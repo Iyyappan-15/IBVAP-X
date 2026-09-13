@@ -298,24 +298,23 @@ elif "Public CCTV" in input_type:
     source_label = f"PUBLIC CCTV ({cctv_info['location']})"
 
     # Display camera origin card
-    st.markdown(
-        f"""<div style="background: #0f172a; border: 1px solid #1e3a8a; border-left: 4px solid #38bdf8; border-radius: 6px; padding: 12px 16px; margin: 10px 0;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <span style="font-weight: 700; color: #f8fafc; font-size: 14px;">📍 {cctv_info['name']}</span>
-                <span style="background: #1e293b; color: #4ade80; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-family: monospace;">🟢 LIVE & ONLINE</span>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12px; font-family: monospace; color: #94a3b8;">
-                <div><b>Origin:</b> <span style="color: #cbd5e1;">{cctv_info['location']}</span></div>
-                <div><b>GPS:</b> <span style="color: #cbd5e1;">{cctv_info['coordinates']}</span></div>
-                <div><b>Sector:</b> <span style="color: #cbd5e1;">{cctv_info['sector']}</span></div>
-                <div><b>Feed Type:</b> <span style="color: #cbd5e1;">{cctv_info['feed_type']}</span></div>
-            </div>
-            <div style="font-size: 11px; color: #64748b; margin-top: 6px; border-top: 1px solid #1e293b; padding-top: 4px;">
-                ℹ️ {cctv_info['desc']}
-            </div>
-        </div>""",
-        unsafe_allow_html=True
+    cctv_card_html = (
+        f'<div style="background: #0f172a; border: 1px solid #1e3a8a; border-left: 4px solid #38bdf8; border-radius: 6px; padding: 12px 16px; margin: 10px 0;">'
+        f'<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">'
+        f'<span style="font-weight: 700; color: #f8fafc; font-size: 14px;">📍 {cctv_info["name"]}</span>'
+        f'<span style="background: #1e293b; color: #4ade80; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-family: monospace;">🟢 LIVE & ONLINE</span>'
+        f'</div>'
+        f'<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12px; font-family: monospace; color: #94a3b8;">'
+        f'<div><b>Origin:</b> <span style="color: #cbd5e1;">{cctv_info["location"]}</span></div>'
+        f'<div><b>GPS:</b> <span style="color: #cbd5e1;">{cctv_info["coordinates"]}</span></div>'
+        f'<div><b>Sector:</b> <span style="color: #cbd5e1;">{cctv_info["sector"]}</span></div>'
+        f'<div><b>Feed Type:</b> <span style="color: #cbd5e1;">{cctv_info["feed_type"]}</span></div>'
+        f'</div>'
+        f'<div style="font-size: 11px; color: #64748b; margin-top: 6px; border-top: 1px solid #1e293b; padding-top: 4px;">'
+        f'ℹ️ {cctv_info["desc"]}'
+        f'</div></div>'
     )
+    st.markdown(cctv_card_html, unsafe_allow_html=True)
 
 # ── D. WEBCAM ──
 elif "Webcam" in input_type:
@@ -387,22 +386,21 @@ elif "RTSP" in input_type:
         camera_id = preset_data["cam_id"]
         source_label = f"RTSP STREAM ({preset_data['location']})"
 
-        st.markdown(
-            f"""<div style="background: #0f172a; border: 1px solid #1e3a8a; border-left: 4px solid #38bdf8; border-radius: 6px; padding: 12px 16px; margin: 10px 0;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                    <span style="font-weight: 700; color: #f8fafc; font-size: 14px;">📍 {selected_preset_key}</span>
-                    <span style="background: #1e293b; color: #38bdf8; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-family: monospace;">RTSP READY</span>
-                </div>
-                <div style="font-size: 12px; font-family: monospace; color: #94a3b8;">
-                    <b>Origin Location:</b> <span style="color: #cbd5e1;">{preset_data['location']}</span> &nbsp;|&nbsp; 
-                    <b>Coordinates:</b> <span style="color: #cbd5e1;">{preset_data['coords']}</span>
-                </div>
-                <div style="font-size: 11px; color: #64748b; font-family: monospace; margin-top: 4px;">
-                    Stream Target: <code>{preset_data['url']}</code>
-                </div>
-            </div>""",
-            unsafe_allow_html=True
+        rtsp_card_html = (
+            f'<div style="background: #0f172a; border: 1px solid #1e3a8a; border-left: 4px solid #38bdf8; border-radius: 6px; padding: 12px 16px; margin: 10px 0;">'
+            f'<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">'
+            f'<span style="font-weight: 700; color: #f8fafc; font-size: 14px;">📍 {selected_preset_key}</span>'
+            f'<span style="background: #1e293b; color: #38bdf8; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-family: monospace;">RTSP READY</span>'
+            f'</div>'
+            f'<div style="font-size: 12px; font-family: monospace; color: #94a3b8;">'
+            f'<b>Origin Location:</b> <span style="color: #cbd5e1;">{preset_data["location"]}</span> &nbsp;|&nbsp; '
+            f'<b>Coordinates:</b> <span style="color: #cbd5e1;">{preset_data["coords"]}</span>'
+            f'</div>'
+            f'<div style="font-size: 11px; color: #64748b; font-family: monospace; margin-top: 4px;">'
+            f'Stream Target: <code>{preset_data["url"]}</code>'
+            f'</div></div>'
         )
+        st.markdown(rtsp_card_html, unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -609,18 +607,7 @@ if start_clicked and selected_file_path:
                         seen_entities[ent_key]["last_frame"] = frame_idx
                         seen_entities[ent_key]["frames_seen"] += 1
 
-                if hasattr(pipeline.detector, "fence_detector") and pipeline.detector.fence_detector.cached_fence_bbox:
-                    if "fence_perimeter" not in seen_entities:
-                        seen_entities["fence_perimeter"] = {
-                            "track_id": "PERIMETER",
-                            "class_name": "fence",
-                            "first_frame": 1,
-                            "last_frame": frame_idx,
-                            "frames_seen": frame_idx,
-                            "confidence": 0.98,
-                            "zone": "Perimeter Physical Barrier",
-                            "direction": "STATIONARY",
-                        }
+
 
                 if getattr(pipeline, "last_reliability", None):
                     rel_obj = pipeline.last_reliability
@@ -799,43 +786,41 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
     duration_disp = f"{(s['processed_frames'] / max(s['source_fps'], 1.0)):.1f} sec"
 
     # ── 1. AI ANALYSIS SUMMARY CARD (PROMINENT TOP CARD) ──
-    st.markdown(
-        f"""<div style="background: linear-gradient(135deg, #0b1329 0%, #0f172a 100%); border: 1px solid #1e3a8a; border-left: 4px solid #38bdf8; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 8px; margin-bottom: 12px;">
-                <span style="font-size: 14px; font-weight: 800; color: #38bdf8; letter-spacing: 0.06em; text-transform: uppercase;">📋 AI Analysis Summary</span>
-                <span style="font-size: 11px; font-family: monospace; color: #94a3b8; background: #1e293b; padding: 2px 8px; border-radius: 4px;">SESSION: {s.get('session_status', 'COMPLETE')}</span>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; font-size: 12px; font-family: monospace; color: #cbd5e1; margin-bottom: 12px;">
-                <div><span style="color: #94a3b8;">Video:</span> <b>{video_name_disp}</b></div>
-                <div><span style="color: #94a3b8;">Camera:</span> <b>{s['camera_id']}</b></div>
-                <div><span style="color: #94a3b8;">Duration:</span> <b>{duration_disp}</b> ({s['processed_frames']} frames)</div>
-                <div><span style="color: #94a3b8;">Throughput:</span> <b>{s['processed_frames'] / max(s['elapsed_seconds'], 0.1):.1f} FPS</b></div>
-            </div>
-            <div style="background: rgba(15, 23, 42, 0.7); border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; line-height: 1.8; color: #e2e8f0; font-family: monospace;">
-                <div>👤 <b>{person_count}</b> person{'s' if person_count != 1 else ''} detected</div>
-                <div>🚶 <b>{active_tracks_count}</b> active track{'s' if active_tracks_count != 1 else ''}</div>
-                <div>{'🌙 Night context' if is_night else '☀️ Day context'}</div>
-                <div>🚧 <b>{zone_entries_count}</b> restricted-zone entr{'ies' if zone_entries_count != 1 else 'y'}</div>
-                <div>⏱ <b>{loitering_count}</b> loitering event{'s' if loitering_count != 1 else ''}</div>
-                <div>➡ {direction_desc}</div>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; padding-top: 10px; border-top: 1px solid #1e293b;">
-                <div>
-                    <div style="font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Highest Event Priority</div>
-                    <div style="font-size: 15px; font-weight: 800; color: {p_color};">{p_badge}</div>
-                </div>
-                <div>
-                    <div style="font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Camera Reliability</div>
-                    <div style="font-size: 15px; font-weight: 800; color: {r_color};">{r_badge}</div>
-                </div>
-                <div>
-                    <div style="font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Actionability</div>
-                    <div style="font-size: 15px; font-weight: 800; color: {a_color};">{a_badge}</div>
-                </div>
-            </div>
-        </div>""",
-        unsafe_allow_html=True
+    summary_card_html = (
+        f'<div style="background: linear-gradient(135deg, #0b1329 0%, #0f172a 100%); border: 1px solid #1e3a8a; border-left: 4px solid #38bdf8; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px;">'
+        f'<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 8px; margin-bottom: 12px;">'
+        f'<span style="font-size: 14px; font-weight: 800; color: #38bdf8; letter-spacing: 0.06em; text-transform: uppercase;">📋 AI Analysis Summary</span>'
+        f'<span style="font-size: 11px; font-family: monospace; color: #94a3b8; background: #1e293b; padding: 2px 8px; border-radius: 4px;">SESSION: {s.get("session_status", "COMPLETE")}</span>'
+        f'</div>'
+        f'<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; font-size: 12px; font-family: monospace; color: #cbd5e1; margin-bottom: 12px;">'
+        f'<div><span style="color: #94a3b8;">Video:</span> <b>{video_name_disp}</b></div>'
+        f'<div><span style="color: #94a3b8;">Camera:</span> <b>{s["camera_id"]}</b></div>'
+        f'<div><span style="color: #94a3b8;">Duration:</span> <b>{duration_disp}</b> ({s["processed_frames"]} frames)</div>'
+        f'<div><span style="color: #94a3b8;">Throughput:</span> <b>{s["processed_frames"] / max(s["elapsed_seconds"], 0.1):.1f} FPS</b></div>'
+        f'</div>'
+        f'<div style="background: rgba(15, 23, 42, 0.7); border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; line-height: 1.8; color: #e2e8f0; font-family: monospace;">'
+        f'<div>👤 <b>{person_count}</b> person{"s" if person_count != 1 else ""} detected</div>'
+        f'<div>🚶 <b>{active_tracks_count}</b> active track{"s" if active_tracks_count != 1 else ""}</div>'
+        f'<div>{"🌙 Night context" if is_night else "☀️ Day context"}</div>'
+        f'<div>🚧 <b>{zone_entries_count}</b> restricted-zone entr{"ies" if zone_entries_count != 1 else "y"}</div>'
+        f'<div>⏱ <b>{loitering_count}</b> loitering event{"s" if loitering_count != 1 else ""}</div>'
+        f'<div>➡ {direction_desc}</div>'
+        f'</div>'
+        f'<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; padding-top: 10px; border-top: 1px solid #1e293b;">'
+        f'<div>'
+        f'<div style="font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Highest Event Priority</div>'
+        f'<div style="font-size: 15px; font-weight: 800; color: {p_color};">{p_badge}</div>'
+        f'</div>'
+        f'<div>'
+        f'<div style="font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Camera Reliability</div>'
+        f'<div style="font-size: 15px; font-weight: 800; color: {r_color};">{r_badge}</div>'
+        f'</div>'
+        f'<div>'
+        f'<div style="font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Actionability</div>'
+        f'<div style="font-size: 15px; font-weight: 800; color: {a_color};">{a_badge}</div>'
+        f'</div></div></div>'
     )
+    st.markdown(summary_card_html, unsafe_allow_html=True)
 
     # ── 2. THREE-SIGNAL INTELLIGENCE ASSESSMENT & FACTOR BREAKDOWN ──
     st.markdown("#### 🛡️ Signature 3-Signal Intelligence Assessment")
@@ -850,67 +835,90 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
 
     # Column 1: Event Priority & Factor Breakdown
     with sig_col1:
-        st.markdown(
-            f"""<div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; height: 100%;">
-                <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">SIGNAL 1 · EVENT PRIORITY</div>
-                <div style="font-size: 20px; font-weight: 800; color: {p_color}; margin: 4px 0 10px 0;">{p_badge}</div>
-                <div style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 4px;">WHY THIS ALERT WAS RAISED:</div>
-                <div style="font-size: 11px; color: #94a3b8; line-height: 1.6; font-family: monospace;">
-                    {'<div style="color: #fca5a5;">+45.0 Restricted Zone Entry</div>' if zone_entries_count > 0 else '<div style="color: #64748b;">+0.0 Outside Zone</div>'}
-                    {'<div style="color: #fca5a5;">+35.0 Physical Sensor Tampering / Attack</div>' if has_tamper else ''}
-                    {'<div style="color: #fca5a5;">+25.0 Hostile Frontal Camera Approach</div>' if has_hostile else ''}
-                    {'<div style="color: #fca5a5;">+20.0 Handheld Weapon / Stone Held</div>' if has_stone else ''}
-                    {'<div style="color: #fca5a5;">+15.0 Adverse Weather (Fog/Snow Cover)</div>' if has_weather else ''}
-                    {'<div style="color: #fca5a5;">+20.0 Night Operation Context</div>' if is_night else '<div style="color: #64748b;">+0.0 Daytime Context</div>'}
-                    {'<div style="color: #fca5a5;">+20.0 Sustained Loitering (>10s)</div>' if loitering_count > 0 else '<div style="color: #64748b;">+0.0 Normal Transit</div>'}
-                    {'<div style="color: #fca5a5;">+15.0 Trajectory Vector (Toward Border)</div>' if "toward" in direction_desc.lower() else '<div style="color: #64748b;">+0.0 Stationary / Lateral</div>'}
-                    <div style="border-top: 1px dashed #334155; margin-top: 6px; padding-top: 4px; color: #f8fafc; font-weight: 700;">
-                        Total Score: {prio_score:.1f} / 100.0 [{prio_label}]
-                    </div>
-                </div>
-            </div>""",
-            unsafe_allow_html=True
+        factor_items = []
+        if zone_entries_count > 0:
+            factor_items.append('<div style="color: #fca5a5;">+45.0 Restricted Zone Entry</div>')
+        else:
+            factor_items.append('<div style="color: #64748b;">+0.0 Outside Zone</div>')
+        
+        if has_tamper:
+            factor_items.append('<div style="color: #fca5a5;">+35.0 Physical Sensor Tampering / Attack</div>')
+        if has_hostile:
+            factor_items.append('<div style="color: #fca5a5;">+25.0 Hostile Frontal Camera Approach</div>')
+        if has_stone:
+            factor_items.append('<div style="color: #fca5a5;">+20.0 Handheld Weapon / Stone Held</div>')
+        if has_weather:
+            factor_items.append('<div style="color: #fca5a5;">+15.0 Adverse Weather (Fog/Snow Cover)</div>')
+        
+        if is_night:
+            factor_items.append('<div style="color: #fca5a5;">+20.0 Night Operation Context</div>')
+        else:
+            factor_items.append('<div style="color: #64748b;">+0.0 Daytime Context</div>')
+
+        if loitering_count > 0:
+            factor_items.append('<div style="color: #fca5a5;">+20.0 Sustained Loitering (>10s)</div>')
+        else:
+            factor_items.append('<div style="color: #64748b;">+0.0 Normal Transit</div>')
+
+        if "toward" in direction_desc.lower():
+            factor_items.append('<div style="color: #fca5a5;">+15.0 Trajectory Vector (Toward Border)</div>')
+        else:
+            factor_items.append('<div style="color: #64748b;">+0.0 Stationary / Lateral</div>')
+
+        factors_html_str = "".join(factor_items)
+
+        sig1_html = (
+            f'<div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; height: 100%;">'
+            f'<div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">SIGNAL 1 · EVENT PRIORITY</div>'
+            f'<div style="font-size: 20px; font-weight: 800; color: {p_color}; margin: 4px 0 10px 0;">{p_badge}</div>'
+            f'<div style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 4px;">WHY THIS ALERT WAS RAISED:</div>'
+            f'<div style="font-size: 11px; color: #94a3b8; line-height: 1.6; font-family: monospace;">'
+            f'{factors_html_str}'
+            f'<div style="border-top: 1px dashed #334155; margin-top: 6px; padding-top: 4px; color: #f8fafc; font-weight: 700;">'
+            f'Total Score: {prio_score:.1f} / 100.0 [{prio_label}]'
+            f'</div></div></div>'
         )
+        st.markdown(sig1_html, unsafe_allow_html=True)
 
     # Column 2: Camera Reliability & Sensor Diagnostics
     with sig_col2:
         blur_val = s.get('blur_score', 95.0)
         lum_val = 92.0 if s.get('avg_luminance', 50.0) > 40 else 45.0
         obs_val = s.get('obstruction_score', 100.0)
-        st.markdown(
-            f"""<div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; height: 100%;">
-                <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">SIGNAL 2 · CAMERA RELIABILITY</div>
-                <div style="font-size: 20px; font-weight: 800; color: {r_color}; margin: 4px 0 10px 0;">{r_badge}</div>
-                <div style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 4px;">SENSOR SUB-METRICS:</div>
-                <div style="font-size: 11px; color: #94a3b8; line-height: 1.6; font-family: monospace;">
-                    <div>• Optical Sharpness : <b style="color: {'#4ade80' if blur_val >= 70 else '#f87171'};">{blur_val:.0f}%</b></div>
-                    <div>• Scene Luminance    : <b style="color: {'#4ade80' if lum_val >= 70 else '#fb923c'};">{lum_val:.0f}%</b></div>
-                    <div>• Frame Continuity   : <b style="color: #4ade80;">100%</b></div>
-                    <div>• Lens Obstruction   : <b style="color: {'#4ade80' if obs_val >= 70 else '#f87171'};">{obs_val:.0f}%</b></div>
-                    <div style="border-top: 1px dashed #334155; margin-top: 6px; padding-top: 4px; color: #f8fafc; font-weight: 700;">
-                        Feed Health: {rel_status} (Zero Glitches)
-                    </div>
-                </div>
-            </div>""",
-            unsafe_allow_html=True
+        blur_color = '#4ade80' if blur_val >= 70 else '#f87171'
+        lum_color = '#4ade80' if lum_val >= 70 else '#fb923c'
+        obs_color = '#4ade80' if obs_val >= 70 else '#f87171'
+
+        sig2_html = (
+            f'<div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; height: 100%;">'
+            f'<div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">SIGNAL 2 · CAMERA RELIABILITY</div>'
+            f'<div style="font-size: 20px; font-weight: 800; color: {r_color}; margin: 4px 0 10px 0;">{r_badge}</div>'
+            f'<div style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 4px;">SENSOR SUB-METRICS:</div>'
+            f'<div style="font-size: 11px; color: #94a3b8; line-height: 1.6; font-family: monospace;">'
+            f'<div>• Optical Sharpness : <b style="color: {blur_color};">{blur_val:.0f}%</b></div>'
+            f'<div>• Scene Luminance    : <b style="color: {lum_color};">{lum_val:.0f}%</b></div>'
+            f'<div>• Frame Continuity   : <b style="color: #4ade80;">100%</b></div>'
+            f'<div>• Lens Obstruction   : <b style="color: {obs_color};">{obs_val:.0f}%</b></div>'
+            f'<div style="border-top: 1px dashed #334155; margin-top: 6px; padding-top: 4px; color: #f8fafc; font-weight: 700;">'
+            f'Feed Health: {rel_status} (Zero Glitches)'
+            f'</div></div></div>'
         )
+        st.markdown(sig2_html, unsafe_allow_html=True)
 
     # Column 3: Actionability & Recommendation
     with sig_col3:
-        st.markdown(
-            f"""<div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; height: 100%;">
-                <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">SIGNAL 3 · ACTIONABILITY</div>
-                <div style="font-size: 20px; font-weight: 800; color: {a_color}; margin: 4px 0 10px 0;">{a_badge}</div>
-                <div style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 4px;">TACTICAL DIRECTIVE:</div>
-                <div style="font-size: 11px; color: #cbd5e1; line-height: 1.5;">
-                    <div style="margin-bottom: 8px;"><b style="color: #38bdf8;">Fusion Rationale:</b> {prio_label} Priority combined with {rel_status} Reliability yields {act_rating} Actionability.</div>
-                    <div style="padding: 6px 8px; background: #1e293b; border-radius: 4px; color: #38bdf8; font-weight: 600; font-size: 11px;">
-                        💡 {action_rec}
-                    </div>
-                </div>
-            </div>""",
-            unsafe_allow_html=True
+        sig3_html = (
+            f'<div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; height: 100%;">'
+            f'<div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">SIGNAL 3 · ACTIONABILITY</div>'
+            f'<div style="font-size: 20px; font-weight: 800; color: {a_color}; margin: 4px 0 10px 0;">{a_badge}</div>'
+            f'<div style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 4px;">TACTICAL DIRECTIVE:</div>'
+            f'<div style="font-size: 11px; color: #cbd5e1; line-height: 1.5;">'
+            f'<div style="margin-bottom: 8px;"><b style="color: #38bdf8;">Fusion Rationale:</b> {prio_label} Priority combined with {rel_status} Reliability yields {act_rating} Actionability.</div>'
+            f'<div style="padding: 6px 8px; background: #1e293b; border-radius: 4px; color: #38bdf8; font-weight: 600; font-size: 11px;">'
+            f'💡 {action_rec}'
+            f'</div></div></div>'
         )
+        st.markdown(sig3_html, unsafe_allow_html=True)
 
     # ── 3. SITUATIONAL NARRATIVE ("WHAT HAPPENED?") ──
     what_happened_str = (

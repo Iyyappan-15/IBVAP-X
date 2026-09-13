@@ -98,7 +98,23 @@ class ContextEngine:
         # 1. Evaluate Hostile Direct Frontal Approach
         bw = track.bbox[2] - track.bbox[0] if track.bbox else 0.0
         bh = track.bbox[3] - track.bbox[1] if track.bbox else 0.0
-        hostile_approach = bool(bh >= float(frame_height) * 0.32 or (len(track.trajectory) >= 3 and bh >= float(frame_height) * 0.25))
+        
+        # Bounding box expansion detection or close proximity
+        is_expanding = False
+        if hasattr(track, "initial_bbox") and track.initial_bbox:
+            init_h = track.initial_bbox[3] - track.initial_bbox[1]
+            if init_h > 0 and (bh / init_h) >= 1.20:
+                is_expanding = True
+
+        hostile_approach = bool(
+            bh >= float(frame_height) * 0.28 or
+            (len(track.trajectory) >= 3 and bh >= float(frame_height) * 0.22) or
+            is_expanding
+        )
+
+        # Classify direction context (hostile camera approach is directed toward border / post)
+        if hostile_approach and d_context in [DirectionEnum.LATERAL, DirectionEnum.UNCERTAIN]:
+            d_context = DirectionEnum.TOWARD_BOUNDARY
 
         # 2. Evaluate Handheld Object / Stone / Weapon Presence
         holding_object = bool(track.class_name in ["stone", "knife", "baseball bat", "weapon", "sports ball"])
@@ -126,8 +142,8 @@ class ContextEngine:
 
         # 4. Evaluate Sensor Tampering / Direct Physical Attack on Camera
         tampering_detected = bool(
-            (bh >= float(frame_height) * 0.58) or
-            (hostile_approach and holding_object and bh >= float(frame_height) * 0.40)
+            (bh >= float(frame_height) * 0.50) or
+            (hostile_approach and (holding_object or bh >= float(frame_height) * 0.38))
         )
 
         return ContextEvent(
