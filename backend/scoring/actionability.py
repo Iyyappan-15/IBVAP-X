@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Optional
 from backend.interfaces import EventPriority, CameraStatus, Actionability
 
 class ActionabilityMatrix:
@@ -8,10 +8,29 @@ class ActionabilityMatrix:
     """
 
     @staticmethod
-    def evaluate(priority: EventPriority, reliability_status: CameraStatus) -> Tuple[Actionability, str]:
+    def evaluate(
+        priority: EventPriority,
+        reliability_status: CameraStatus,
+        camera_broken: bool = False
+    ) -> Tuple[Actionability, str]:
         """
         Returns Tuple[Actionability (HIGH|MEDIUM|LOW), action_recommendation_text].
+
+        Special Rule: If camera_broken is True, this is ALWAYS a HIGH actionability event
+        regardless of priority level — physical destruction of surveillance hardware
+        requires immediate physical response.
         """
+        # ── Camera Broken Override Rule ──────────────────────────────────────────
+        # Physical camera destruction = highest possible threat to surveillance integrity.
+        # Cannot dismiss or downgrade — always dispatch immediately.
+        if camera_broken:
+            return (
+                Actionability.HIGH,
+                "CRITICAL: Camera physically destroyed / lens shattered. "
+                "Immediate physical dispatch to camera post required. "
+                "Switch to adjacent camera feed. Suspect confirmed in vicinity."
+            )
+
         # OFFLINE Camera handling
         if reliability_status == CameraStatus.OFFLINE:
             return (

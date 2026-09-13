@@ -2,7 +2,9 @@ import json
 import os
 import logging
 from typing import List, Dict, Optional
-from backend.interfaces import Track, ContextEvent, TimeContextEnum, DirectionEnum
+import numpy as np
+import cv2
+from backend.interfaces import Track, ContextEvent, TimeContextEnum, DirectionEnum, ReliabilityScore
 from backend.context.zones import ZoneManager
 from backend.context.loitering import LoiteringDetector
 from backend.context.time_context import TimeContextClassifier
@@ -52,7 +54,8 @@ class ContextEngine:
         frame_height: int = 480,
         timestamp: float = None,
         image_np: Optional[np.ndarray] = None,
-        active_tracks: Optional[List[Track]] = None
+        active_tracks: Optional[List[Track]] = None,
+        reliability_score: Optional[ReliabilityScore] = None
     ) -> ContextEvent:
         curr_time = timestamp or track.last_seen
         last_center = track.trajectory[-1] if track.trajectory else (0.0, 0.0)
@@ -146,6 +149,47 @@ class ContextEngine:
             (hostile_approach and (holding_object or bh >= float(frame_height) * 0.38))
         )
 
+        # 5. Camera Broken Detection — Physical destruction of lens/housing
+        # Indicators:
+        #   a) Severe blur (Laplacian variance near 0, blur_score < 15)  → lens cracked/hit
+        #   b) Near-complete obstruction (obstruction_score < 20)         → lens fully covered
+        #   c) Hostile approach with object AND camera already degrading   → escalate to broken
+        #   d) Sudden full-frame darkness (mean_lum < 20, std < 12)       → camera dead
+        camera_broken = False
+        if reliability_score is not None:
+            blur_score = reliability_score.blur_score
+            obs_score = reliability_score.obstruction_score
+            composite = reliability_score.composite_reliability_score
+
+            # Lens cracked or heavily damaged → blur near zero
+            if blur_score < 15.0:
+                camera_broken = True
+            # Lens fully covered / spray-painted / smashed → near uniform patch
+            elif obs_score < 20.0:
+                camera_broken = True
+            # Composite below 25 while hostile attack is ongoing → camera is being broken
+            elif composite < 25.0 and (hostile_approach or tampering_detected):
+                camera_broken = True
+
+        # Also check raw image for sudden pitch-black or all-white static frame
+        if not camera_broken and image_np is not None and image_np.size > 0:
+            try:
+                gray_check = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY) if len(image_np.shape) == 3 else image_np
+                mean_raw = float(np.mean(gray_check))
+                std_raw = float(np.std(gray_check))
+                # Pitch dark (camera dead) or completely white (shattered lens glare)
+                if (mean_raw < 15.0 and std_raw < 10.0) or (mean_raw > 240.0 and std_raw < 10.0):
+                    camera_broken = True
+                # Static noise / heavy flicker: very high uniform variance
+                if std_raw > 90.0 and mean_raw < 100.0:
+                    camera_broken = True
+            except Exception:
+                pass
+
+        # If camera is confirmed broken, always set tampering_detected as well
+        if camera_broken:
+            tampering_detected = True
+
         return ContextEvent(
             camera_id=camera_id,
             track_id=track.track_id,
@@ -160,5 +204,6 @@ class ContextEngine:
             hostile_approach=hostile_approach,
             holding_object=holding_object,
             adverse_weather=adverse_weather,
-            tampering_detected=tampering_detected
+            tampering_detected=tampering_detected,
+            camera_broken=camera_broken
         )

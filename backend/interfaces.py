@@ -99,6 +99,7 @@ class ContextEvent(BaseModel):
     holding_object: bool = False
     adverse_weather: bool = False
     tampering_detected: bool = False
+    camera_broken: bool = False  # Physical destruction of lens/housing detected
 
 # Reliability Score Schema
 class ReliabilityScore(BaseModel):

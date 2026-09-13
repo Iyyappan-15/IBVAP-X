@@ -59,7 +59,8 @@ class AlertManager:
         # Evaluate Actionability independently
         actionability, rec_text = self.actionability_matrix.evaluate(
             priority=priority,
-            reliability_status=reliability_score.status
+            reliability_status=reliability_score.status,
+            camera_broken=getattr(context_event, "camera_broken", False)
         )
 
         alert_id = f"ALT-{uuid.uuid4().hex[:8].upper()}"

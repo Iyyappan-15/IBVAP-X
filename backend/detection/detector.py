@@ -147,6 +147,12 @@ class ObjectDetector:
         """
         Detects compact handheld objects (stones, tools, wire cutters, thrown items)
         in hands, chest/abdomen, and payload zones of detected persons.
+
+        Dual-strategy detection:
+          A) Edge-based: Canny + Laplacian + morphological close for clear scenes.
+          B) Color-based: HSV/Lab dark-blob isolation against snow/fog backgrounds.
+             In snowy/foggy scenes the stone (dark/warm-toned) has high contrast
+             against the white background even when edge density is globally low.
         """
         if image_np is None or not person_detections:
             return []
@@ -155,58 +161,115 @@ class ObjectDetector:
         gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
         handheld_dets: List[Detection] = []
 
+        # Global scene analysis: detect foggy/snowy (bright, flat) conditions
+        mean_lum = float(np.mean(gray))
+        std_lum = float(np.std(gray))
+        is_adverse_scene = (std_lum < 42.0 and mean_lum > 110.0) or (std_lum < 30.0) or (mean_lum < 45.0)
+
+        # Precompute Lab + HSV for color-based method
+        lab_img = cv2.cvtColor(image_np, cv2.COLOR_BGR2LAB)
+        hsv_img = cv2.cvtColor(image_np, cv2.COLOR_BGR2HSV)
+
         for p_det in person_detections:
             px1, py1, px2, py2 = [int(v) for v in p_det.bbox]
             pw = max(1, px2 - px1)
             ph = max(1, py2 - py1)
 
-            # Regions of interest: Left Hand, Right Hand, Center Chest/Waist, and Ground Footstep Payload
+            # 4 ROIs covering all holding positions
             rois = [
                 # Left hand region
-                (max(0, px1 - int(pw * 0.25)), max(0, py1 + int(ph * 0.30)), min(w, px1 + int(pw * 0.45)), min(h, py1 + int(ph * 0.90))),
+                (max(0, px1 - int(pw * 0.25)), max(0, py1 + int(ph * 0.30)),
+                 min(w, px1 + int(pw * 0.45)), min(h, py1 + int(ph * 0.90))),
                 # Right hand region
-                (max(0, px2 - int(pw * 0.45)), max(0, py1 + int(ph * 0.30)), min(w, px2 + int(pw * 0.25)), min(h, py1 + int(ph * 0.90))),
+                (max(0, px2 - int(pw * 0.45)), max(0, py1 + int(ph * 0.30)),
+                 min(w, px2 + int(pw * 0.25)), min(h, py1 + int(ph * 0.90))),
                 # Center chest/abdomen / tool hold region
-                (max(0, px1 + int(pw * 0.20)), max(0, py1 + int(ph * 0.35)), min(w, px2 - int(pw * 0.20)), min(h, py1 + int(ph * 0.75))),
+                (max(0, px1 + int(pw * 0.20)), max(0, py1 + int(ph * 0.35)),
+                 min(w, px2 - int(pw * 0.20)), min(h, py1 + int(ph * 0.75))),
                 # Footstep payload / dropped stone region
-                (max(0, px1 - int(pw * 0.15)), max(0, py2 - int(ph * 0.18)), min(w, px2 + int(pw * 0.15)), min(h, py2 + int(ph * 0.15))),
+                (max(0, px1 - int(pw * 0.15)), max(0, py2 - int(ph * 0.18)),
+                 min(w, px2 + int(pw * 0.15)), min(h, py2 + int(ph * 0.15))),
             ]
 
             for rx1, ry1, rx2, ry2 in rois:
                 if rx2 <= rx1 or ry2 <= ry1:
                     continue
 
+                # ── Strategy A: Edge-based (for normal contrast scenes) ─────────────────
+                candidate_mask_edge = None
                 roi_gray = gray[ry1:ry2, rx1:rx2]
-                if roi_gray.size == 0:
+                if roi_gray.size > 0:
+                    # Lower thresholds for foggy: use 10/50 instead of 30/100
+                    lo_th, hi_th = (10, 50) if is_adverse_scene else (30, 100)
+                    roi_blur = cv2.GaussianBlur(roi_gray, (3, 3), 0)
+                    canny = cv2.Canny(roi_blur, lo_th, hi_th)
+                    lap = cv2.convertScaleAbs(cv2.Laplacian(roi_blur, cv2.CV_64F))
+                    combined = cv2.bitwise_or(
+                        canny, cv2.threshold(lap, 12, 255, cv2.THRESH_BINARY)[1]
+                    )
+                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+                    candidate_mask_edge = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
+
+                # ── Strategy B: Color-based dark-blob against snow/fog backgrounds ──────
+                # Stones are typically dark (low L in Lab) or warm-brown (hue 10-30 in HSV).
+                # Against bright snow/fog background they create a strong blob.
+                candidate_mask_color = None
+                roi_lab = lab_img[ry1:ry2, rx1:rx2]
+                roi_hsv = hsv_img[ry1:ry2, rx1:rx2]
+                if roi_lab.size > 0:
+                    # Dark objects: L channel (Lab) < 130 in bright scene
+                    L_channel = roi_lab[:, :, 0]
+                    if is_adverse_scene and mean_lum > 100:
+                        # Snow background: stones/objects stand out as dark patches
+                        # Threshold: pixels darker than 70% of mean scene brightness
+                        dark_thresh = min(160, int(mean_lum * 0.70))
+                        dark_mask = (L_channel < dark_thresh).astype(np.uint8) * 255
+                    else:
+                        # General: isolate anything below scene median brightness
+                        scene_median_L = float(np.median(lab_img[:, :, 0]))
+                        dark_mask = (L_channel < max(100, scene_median_L * 0.75)).astype(np.uint8) * 255
+
+                    # Warm brown/orange tone mask (stone/rock typical hue 5–35)
+                    warm_mask = cv2.inRange(roi_hsv, np.array([5, 30, 30]), np.array([35, 255, 220]))
+
+                    # Combine dark + warm masks
+                    color_combined = cv2.bitwise_or(dark_mask, warm_mask)
+
+                    # Morphological cleanup
+                    kernel_c = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                    candidate_mask_color = cv2.morphologyEx(
+                        cv2.morphologyEx(color_combined, cv2.MORPH_OPEN, kernel_c),
+                        cv2.MORPH_CLOSE, kernel_c
+                    )
+
+                # ── Merge both candidate masks ────────────────────────────────────────────
+                candidate_mask = None
+                if candidate_mask_edge is not None and candidate_mask_color is not None:
+                    candidate_mask = cv2.bitwise_or(candidate_mask_edge, candidate_mask_color)
+                elif candidate_mask_edge is not None:
+                    candidate_mask = candidate_mask_edge
+                elif candidate_mask_color is not None:
+                    candidate_mask = candidate_mask_color
+
+                if candidate_mask is None:
                     continue
 
-                # Adaptive gradient & edge analysis for stone/tool texture
-                roi_blur = cv2.GaussianBlur(roi_gray, (3, 3), 0)
-                # Sobel + Canny combined edge intensity
-                canny = cv2.Canny(roi_blur, 30, 100)
-                lap = cv2.convertScaleAbs(cv2.Laplacian(roi_blur, cv2.CV_64F))
-                combined = cv2.bitwise_or(canny, cv2.threshold(lap, 15, 255, cv2.THRESH_BINARY)[1])
-
-                # Morphological close to bridge internal object contours
-                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-                closed = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
-
-                contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                contours, _ = cv2.findContours(candidate_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 for cnt in contours:
                     area = cv2.contourArea(cnt)
                     # Handheld object size constraint
-                    if 45 <= area <= int(pw * ph * 0.22):
+                    if 30 <= area <= int(pw * ph * 0.28):
                         cx, cy, cw, ch = cv2.boundingRect(cnt)
                         aspect = float(cw) / max(1, float(ch))
-                        if 0.30 <= aspect <= 3.0 and cw >= 8 and ch >= 8:
+                        if 0.25 <= aspect <= 4.0 and cw >= 7 and ch >= 7:
                             ox1 = float(rx1 + cx)
                             oy1 = float(ry1 + cy)
                             ox2 = float(rx1 + cx + cw)
                             oy2 = float(ry1 + cy + ch)
 
-                            # Check for duplicates
+                            # Check for near-duplicates
                             is_dup = any(
-                                abs(ox1 - ed.bbox[0]) < 18 and abs(oy1 - ed.bbox[1]) < 18
+                                abs(ox1 - ed.bbox[0]) < 20 and abs(oy1 - ed.bbox[1]) < 20
                                 for ed in handheld_dets
                             )
 
@@ -216,7 +279,8 @@ class ObjectDetector:
                                         class_id=88,
                                         class_name="stone",
                                         confidence=0.91,
-                                        bbox=[round(ox1, 2), round(oy1, 2), round(ox2, 2), round(oy2, 2)],
+                                        bbox=[round(ox1, 2), round(oy1, 2),
+                                              round(ox2, 2), round(oy2, 2)],
                                         camera_id=camera_id,
                                         timestamp=timestamp,
                                         frame_id=frame_id

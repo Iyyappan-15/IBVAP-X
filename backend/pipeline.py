@@ -89,7 +89,8 @@ class IBVAPXPipeline:
                 frame_height=image_np.shape[0],
                 timestamp=frame_obj.timestamp,
                 image_np=image_np,
-                active_tracks=tracks
+                active_tracks=tracks,
+                reliability_score=rel_score
             )
             ctx_events.append(ctx_event)
 
@@ -129,4 +130,20 @@ class IBVAPXPipeline:
         # Draw visual tracking overlay
         annotated = ObjectTracker.draw_tracks_overlay(image_np, tracks)
 
+        # Draw scene-level condition banners (fog, camera broken) on top
+        adverse_weather_any = any(getattr(e, "adverse_weather", False) for e in ctx_events)
+        camera_broken_any = any(getattr(e, "camera_broken", False) for e in ctx_events)
+        # If no tracks, still check raw reliability for camera-broken
+        if not ctx_events and self.last_reliability:
+            rel = self.last_reliability
+            if rel.blur_score < 15.0 or rel.obstruction_score < 20.0 or rel.composite_reliability_score < 15.0:
+                camera_broken_any = True
+
+        annotated = ObjectTracker.draw_scene_overlay(
+            annotated,
+            adverse_weather=adverse_weather_any,
+            camera_broken=camera_broken_any
+        )
+
         return annotated, new_alerts
+

@@ -304,12 +304,16 @@ class ObjectTracker:
 
         # Class-specific theme colours (BGR)
         CLASS_COLORS = {
-            "person": (0, 140, 255),       # Orange
-            "car": (255, 180, 0),          # Cyan/Amber
-            "fence": (0, 230, 70),         # Bright Neon Green
-            "truck": (255, 100, 0),        # Deep Blue
-            "bus": (200, 200, 0),          # Cyan
-            "motorcycle": (0, 220, 255),   # Yellow
+            "person": (0, 140, 255),          # Orange
+            "car": (255, 180, 0),             # Cyan/Amber
+            "fence": (0, 230, 70),            # Bright Neon Green
+            "fence_perimeter": (0, 230, 70),  # Bright Neon Green
+            "stone": (180, 0, 255),           # Purple/Violet
+            "knife": (0, 0, 230),             # Red
+            "weapon": (0, 0, 200),            # Dark Red
+            "truck": (255, 100, 0),           # Deep Blue
+            "bus": (200, 200, 0),             # Cyan
+            "motorcycle": (0, 220, 255),      # Yellow
         }
 
 
@@ -355,5 +359,49 @@ class ObjectTracker:
                 (lx + 3, ly - 2),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 1, cv2.LINE_AA,
             )
+
+        return annotated
+
+    @staticmethod
+    def draw_scene_overlay(
+        frame_img: np.ndarray,
+        adverse_weather: bool = False,
+        camera_broken: bool = False
+    ) -> np.ndarray:
+        """
+        Draws scene-level condition banners on the frame:
+        - ⛅ FOG / LOW VISIBILITY banner (amber) when adverse_weather is True
+        - 🔴 CAMERA DESTROYED banner (red flashing) when camera_broken is True
+
+        Call this AFTER draw_tracks_overlay so it appears on top.
+        """
+        annotated = frame_img.copy()
+        h, w = annotated.shape[:2]
+        banner_y = 10
+
+        if camera_broken:
+            # Bold full-width red banner at top
+            banner_h = 34
+            overlay = annotated.copy()
+            cv2.rectangle(overlay, (0, banner_y), (w, banner_y + banner_h), (0, 0, 200), -1)
+            cv2.addWeighted(overlay, 0.75, annotated, 0.25, 0, annotated)
+            label = "!! CAMERA DESTROYED — CRITICAL ALERT — DISPATCH IMMEDIATELY !!"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 2)
+            tx = max(4, (w - tw) // 2)
+            cv2.putText(annotated, label, (tx, banner_y + 23),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2, cv2.LINE_AA)
+            banner_y += banner_h + 6
+
+        if adverse_weather:
+            # Amber banner below the broken camera banner (if any)
+            banner_h = 28
+            overlay = annotated.copy()
+            cv2.rectangle(overlay, (0, banner_y), (w, banner_y + banner_h), (0, 160, 220), -1)
+            cv2.addWeighted(overlay, 0.65, annotated, 0.35, 0, annotated)
+            label = "⚠  FOG / LOW VISIBILITY DETECTED — REDUCED DETECTION ACCURACY"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.46, 1)
+            tx = max(4, (w - tw) // 2)
+            cv2.putText(annotated, label, (tx, banner_y + 19),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.46, (255, 255, 255), 1, cv2.LINE_AA)
 
         return annotated
