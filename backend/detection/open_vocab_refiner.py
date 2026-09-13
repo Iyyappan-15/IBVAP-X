@@ -37,8 +37,8 @@ class OpenVocabEngine:
         auto_download: bool = None,
         confidence_threshold: float = 0.25
     ):
-        self.model_path = model_path or settings.OPEN_VOCAB_MODEL_PATH
-        self.auto_download = auto_download if auto_download is not None else settings.OPEN_VOCAB_AUTO_DOWNLOAD
+        self.model_path = model_path or getattr(settings, "OPEN_VOCAB_MODEL_PATH", "data/models/yolov8s-worldv2.pt")
+        self.auto_download = auto_download if auto_download is not None else getattr(settings, "OPEN_VOCAB_AUTO_DOWNLOAD", False)
         self.confidence_threshold = confidence_threshold
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.model = None
@@ -73,7 +73,8 @@ class OpenVocabEngine:
                 shutil.copy("yolov8s-worldv2.pt", self.model_path)
 
             # Set default preset classes
-            self.set_classes(self.PROMPT_PRESETS.get(settings.PROMPT_PRESET_DEFAULT, self.PROMPT_PRESETS["perimeter"]))
+            preset_default = getattr(settings, "PROMPT_PRESET_DEFAULT", "perimeter")
+            self.set_classes(self.PROMPT_PRESETS.get(preset_default, self.PROMPT_PRESETS["perimeter"]))
             logger.info(f"[OpenVocabEngine] Model successfully initialized on {self.device}")
         except Exception as e:
             logger.error(f"[OpenVocabEngine] Failed to initialize YOLO-World model: {e}")
@@ -152,7 +153,7 @@ class OpenVocabEngine:
                 cls_name = cls_name.lower().strip()
 
                 # Experimental unclassified flagging
-                if settings.ENABLE_UNCLASSIFIED_FLAGGING and conf < 0.20:
+                if getattr(settings, "ENABLE_UNCLASSIFIED_FLAGGING", False) and conf < 0.20:
                     cls_name = "UNCLASSIFIED — REVIEW"
 
                 det = Detection(

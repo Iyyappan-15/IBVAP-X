@@ -105,7 +105,8 @@ class IBVAPXPipeline:
                 open_vocab_dets.extend(refined)
 
             # Operation 2: Full-Frame Keyframe Discovery on interval
-            if (frame_obj.timestamp - self.last_keyframe_time >= settings.SMART_DETECTION_INTERVAL_SECONDS) or (self.last_keyframe_time == 0.0):
+            interval_sec = getattr(settings, "SMART_DETECTION_INTERVAL_SECONDS", 2.0)
+            if (frame_obj.timestamp - self.last_keyframe_time >= interval_sec) or (self.last_keyframe_time == 0.0):
                 discovered = self.open_vocab_engine.discover_full_frame(
                     image_np,
                     camera_id=frame_obj.camera_id,

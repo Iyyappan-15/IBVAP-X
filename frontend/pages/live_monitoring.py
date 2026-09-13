@@ -215,7 +215,7 @@ else:
 safe_set_setting(settings, "SMART_DETECTION_INTERVAL_SECONDS", keyframe_interval_val)
 
 # Check open-vocab model weight availability
-ov_weights_path = settings.OPEN_VOCAB_MODEL_PATH
+ov_weights_path = getattr(settings, "OPEN_VOCAB_MODEL_PATH", "data/models/yolov8s-worldv2.pt")
 weights_exist = os.path.exists(ov_weights_path) and os.path.getsize(ov_weights_path) > 0
 
 if not weights_exist:
@@ -472,13 +472,13 @@ if start_clicked and selected_file_path:
             mc1, mc2, mc3, mc4 = st.columns(4)
             mc1.markdown(f"**Primary Model:** `{m_name}`")
             mc2.markdown(f"**Device:** `{m_dev}` | **Size:** `{m_sz}px`")
-            mc3.markdown(f"**Detection Mode:** `{settings.HYBRID_DETECTION_MODE.upper()}`")
+            mc3.markdown(f"**Detection Mode:** `{str(getattr(settings, 'HYBRID_DETECTION_MODE', 'hybrid')).upper()}`")
             mc4.markdown(f"**Open-Vocab Status:** `{'ONLINE' if ov_avail else 'OFFLINE / UNLOADED'}`")
             
             if ov_avail:
                 st.success(
                     f"🤖 **Open-Vocabulary Engine Active**: Checkpoint `{os.path.basename(ov_info.get('model_path', ''))}` | "
-                    f"Active Prompts: `{', '.join(ov_info.get('active_prompts', []))}` | Keyframe Interval: `{settings.SMART_DETECTION_INTERVAL_SECONDS}s`"
+                    f"Active Prompts: `{', '.join(ov_info.get('active_prompts', []))}` | Keyframe Interval: `{getattr(settings, 'SMART_DETECTION_INTERVAL_SECONDS', 2.0)}s`"
                 )
             else:
                 st.info("ℹ️ Standard `yolov8n.pt` COCO model active. Open-vocabulary discovery disabled or weights missing.")
