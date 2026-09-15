@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     # Dual-Path Open-Vocabulary & Semantic Refinement Settings
     HYBRID_DETECTION_MODE: str = "hybrid"  # "standard", "open_vocabulary", "hybrid"
     OPEN_VOCAB_MODEL_PATH: str = "data/models/yolov8s-worldv2.pt"
-    OPEN_VOCAB_AUTO_DOWNLOAD: bool = False
+    OPEN_VOCAB_AUTO_DOWNLOAD: bool = True
     SMART_DETECTION_INTERVAL_SECONDS: float = 2.0
     ENABLE_UNCLASSIFIED_FLAGGING: bool = False
     PROMPT_PRESET_DEFAULT: str = "perimeter"

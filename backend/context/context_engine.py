@@ -64,7 +64,7 @@ class ContextEngine:
         norm_x = max(0.0, min(1.0, last_center[0] / float(frame_width)))
         norm_y = max(0.0, min(1.0, last_center[1] / float(frame_height)))
 
-        # Check zone entry (Fallback: in simulated feeds or upload, default central area is monitored zone)
+        # Check zone entry (Configured restricted polygons only)
         zones = self.camera_zones.get(camera_id, [])
         matched_zone_name: Optional[str] = None
         in_zone = False
@@ -72,13 +72,17 @@ class ContextEngine:
         if zones:
             for zm in zones:
                 if zm.is_point_in_zone(norm_x, norm_y):
-                    in_zone = True
                     matched_zone_name = zm.zone_name
+                    z_lower = zm.zone_name.lower()
+                    if "primary" in z_lower or "observation" in z_lower or "general" in z_lower or "safe" in z_lower:
+                        in_zone = False
+                    else:
+                        in_zone = True
                     break
         else:
-            # Default perimeter monitoring zone for upload / unconfigured cameras
-            in_zone = True
-            matched_zone_name = "Perimeter Buffer Zone Alpha"
+            # Uploaded or unconfigured feeds without explicit restricted polygons remain outside restricted zones
+            in_zone = False
+            matched_zone_name = "General Observation Sector"
 
         # Check loitering
         loitering_detector = self.loitering_detectors.setdefault(camera_id, LoiteringDetector())
@@ -102,18 +106,22 @@ class ContextEngine:
         bw = track.bbox[2] - track.bbox[0] if track.bbox else 0.0
         bh = track.bbox[3] - track.bbox[1] if track.bbox else 0.0
         
-        # Bounding box expansion detection or close proximity
-        is_expanding = False
-        if hasattr(track, "initial_bbox") and track.initial_bbox:
+        # Requires kinematic trajectory: target must be approaching camera plane (expanding + moving)
+        hostile_approach = False
+        is_approach_target = track.class_name in ["person", "car", "truck", "motorcycle", "vehicle"]
+        
+        if is_approach_target and len(track.trajectory) >= 4 and hasattr(track, "initial_bbox") and track.initial_bbox:
             init_h = track.initial_bbox[3] - track.initial_bbox[1]
-            if init_h > 0 and (bh / init_h) >= 1.20:
-                is_expanding = True
-
-        hostile_approach = bool(
-            bh >= float(frame_height) * 0.28 or
-            (len(track.trajectory) >= 3 and bh >= float(frame_height) * 0.22) or
-            is_expanding
-        )
+            first_pt = track.trajectory[0]
+            last_pt = track.trajectory[-1]
+            disp_y = last_pt[1] - first_pt[1]
+            total_disp = float(np.hypot(last_pt[0] - first_pt[0], last_pt[1] - first_pt[1]))
+            
+            # Hostile approach: rapid bounding box expansion towards camera post AND non-trivial downward displacement
+            if init_h > 0:
+                expansion_ratio = bh / init_h
+                if expansion_ratio >= 1.35 and disp_y >= 20.0 and total_disp >= 25.0 and bh >= float(frame_height) * 0.35:
+                    hostile_approach = True
 
         # Classify direction context (hostile camera approach is directed toward border / post)
         if hostile_approach and d_context in [DirectionEnum.LATERAL, DirectionEnum.UNCERTAIN]:
@@ -144,10 +152,21 @@ class ContextEngine:
                 pass
 
         # 4. Evaluate Sensor Tampering / Direct Physical Attack on Camera
-        tampering_detected = bool(
-            (bh >= float(frame_height) * 0.50) or
-            (hostile_approach and (holding_object or bh >= float(frame_height) * 0.38))
-        )
+        # Physical sensor tampering requires actual sensor degradation (blur/obstruction) while in close proximity
+        tampering_detected = False
+        if reliability_score is not None:
+            blur_score = getattr(reliability_score, "blur_score", 100.0)
+            obs_score = getattr(reliability_score, "obstruction_score", 100.0)
+            comp_rel = getattr(reliability_score, "composite_reliability_score", 100.0)
+
+            # Sensor degradation must be genuinely observed on the camera feed
+            if obs_score < 40.0 or blur_score < 25.0 or comp_rel < 50.0:
+                if bh >= float(frame_height) * 0.50 or holding_object or hostile_approach:
+                    tampering_detected = True
+        else:
+            # Fallback if reliability score omitted: only extreme close-contact with confirmed weapon/projectile
+            if hostile_approach and holding_object and bh >= float(frame_height) * 0.55:
+                tampering_detected = True
 
         # 5. Camera Broken Detection — Physical destruction of lens/housing
         # Indicators:

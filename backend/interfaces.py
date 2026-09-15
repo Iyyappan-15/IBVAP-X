@@ -92,6 +92,7 @@ class Track(BaseModel):
     zone_history: List[str] = Field(default_factory=list)
     label_stability: str = "HIGH"  # HIGH | MEDIUM | LOW
     source: DetectionSource = DetectionSource.YOLO
+    initial_bbox: Optional[List[float]] = None
 
 # Context Event Schema
 class ContextEvent(BaseModel):

@@ -15,6 +15,7 @@ from backend.correlation.event_correlator import EventCorrelator
 from backend.alerts.alert_manager import AlertManager
 from backend.evidence.buffer import PreEventRingBuffer
 from backend.evidence.capture import EvidenceCapturer
+from backend.config import settings
 
 logger = logging.getLogger(__name__)
 

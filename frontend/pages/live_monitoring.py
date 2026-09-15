@@ -248,8 +248,8 @@ ov_weights_path = getattr(settings, "OPEN_VOCAB_MODEL_PATH", "data/models/yolov8
 weights_exist = os.path.exists(ov_weights_path) and os.path.getsize(ov_weights_path) > 0
 
 if not weights_exist:
-    st.sidebar.warning(f"⚠️ Open-vocabulary weights not found at `{ov_weights_path}`")
-    if st.sidebar.button("📥 Download Open-Vocabulary Weights"):
+    st.sidebar.info("💡 Standard YOLOv8 + Smart Geometry Engine active. (YOLO-World weights available on-demand).")
+    if st.sidebar.button("📥 Download YOLO-World Weights (25MB)"):
         with st.sidebar.spinner("Downloading yolov8s-worldv2.pt model weights..."):
             try:
                 from scripts.download_open_vocab_model import download_model
@@ -259,7 +259,7 @@ if not weights_exist:
             except Exception as dl_err:
                 st.sidebar.error(f"Download failed: {dl_err}")
 else:
-    st.sidebar.caption(f"✅ Open-Vocab Weights Ready (`{os.path.basename(ov_weights_path)}`)")
+    st.sidebar.caption(f"✅ Open-Vocab & Tactical Weights Active (`{os.path.basename(ov_weights_path)}`)")
 
 # Set active prompt preset
 if "Border" in prompt_preset_choice:
@@ -673,8 +673,8 @@ if start_clicked and selected_file_path:
                             "last_frame": frame_idx,
                             "frames_seen": 1,
                             "confidence": tdata.get("confidence", 0.95),
-                            "zone": "Restricted Zone Alpha" if frame_idx > 15 else "Perimeter Approach",
-                            "direction": "TOWARD_BOUNDARY" if frame_idx > 20 else "LATERAL",
+                            "zone": "General Observation Sector",
+                            "direction": "Stationary / Lateral",
                         }
                         event_timeline_records.append({
                             "time_offset": f"+{frame_idx / max(source_fps, 1.0):.1f}s",
@@ -691,10 +691,14 @@ if start_clicked and selected_file_path:
                     for ce in pipeline.last_context_events:
                         c_key = f"{ce.class_name}_{ce.track_id}"
                         if c_key in seen_entities:
-                            dir_str = str(getattr(ce, "direction", "TOWARD_BOUNDARY")).replace("DirectionEnum.", "")
-                            seen_entities[c_key]["direction"] = dir_str
+                            dir_enum_val = getattr(ce, "direction", None)
+                            if dir_enum_val:
+                                dir_str = str(dir_enum_val).replace("DirectionEnum.", "")
+                                seen_entities[c_key]["direction"] = dir_str
                             if getattr(ce, "zone_name", None):
                                 seen_entities[c_key]["zone"] = ce.zone_name
+                            seen_entities[c_key]["in_restricted_zone"] = getattr(ce, "in_restricted_zone", False)
+                            seen_entities[c_key]["loitering"] = getattr(ce, "loitering", False)
 
 
 
@@ -851,24 +855,27 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
 
     # Context items
     is_night = s.get("avg_luminance", 50.0) < 65.0
-    zone_entries_count = sum(1 for e in non_fence_entities if "restricted" in e.get("zone", "").lower() or "zone" in e.get("zone", "").lower())
-    if zone_entries_count == 0 and alert_obj and any("zone" in r.lower() or "restricted" in r.lower() for r in alert_obj.get("why_reasons", [])):
+    zone_entries_count = sum(1 for e in non_fence_entities if bool(e.get("in_restricted_zone", False)) or ("restricted" in e.get("zone", "").lower()))
+    if zone_entries_count == 0 and alert_obj and any("restricted zone" in r.lower() for r in alert_obj.get("why_reasons", [])):
         zone_entries_count = 1
 
-    loitering_count = sum(1 for e in non_fence_entities if e.get("frames_seen", 0) > 10)
+    loitering_threshold_s = float(getattr(settings, "LOITERING_THRESHOLD_SECONDS", 30.0))
+    loitering_count = sum(1 for e in non_fence_entities if bool(e.get("loitering", False)) or ((e.get("frames_seen", 0) / max(s.get("source_fps", 30.0), 1.0)) >= loitering_threshold_s))
     if loitering_count == 0 and alert_obj and any("loiter" in r.lower() for r in alert_obj.get("why_reasons", [])):
         loitering_count = 1
 
     # Direction vector determination
-    direction_desc = "Moving toward boundary"
+    direction_desc = "Stationary / Lateral"
     if non_fence_entities:
-        dirs = [e.get("direction", "TOWARD_BOUNDARY") for e in non_fence_entities]
-        if "TOWARD_BOUNDARY" in dirs or any("toward" in r.lower() or "frontal" in r.lower() for r in (alert_obj.get("why_reasons", []) if alert_obj else [])):
+        dirs = [str(e.get("direction", "")).upper() for e in non_fence_entities]
+        if "TOWARD_BOUNDARY" in dirs or any("toward border" in r.lower() or "frontal approach" in r.lower() for r in (alert_obj.get("why_reasons", []) if alert_obj else [])):
             direction_desc = "Moving toward boundary"
-        elif "LATERAL" in dirs:
+        elif any("LATERAL" in d for d in dirs):
             direction_desc = "Lateral traversal along boundary"
+        elif any("AWAY" in d for d in dirs):
+            direction_desc = "Moving away from boundary"
         else:
-            direction_desc = "Stationary perimeter presence"
+            direction_desc = "Stationary / Normal presence"
 
     # 3-Signal states
     prio_label = alert_obj["priority"] if alert_obj else "LOW"
@@ -967,7 +974,7 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
             factor_items.append('<div style="color: #64748b;">+0.0 Daytime Context</div>')
 
         if loitering_count > 0:
-            factor_items.append('<div style="color: #fca5a5;">+20.0 Sustained Loitering (>10s)</div>')
+            factor_items.append(f'<div style="color: #fca5a5;">+20.0 Sustained Loitering (>{loitering_threshold_s:.0f}s)</div>')
         else:
             factor_items.append('<div style="color: #64748b;">+0.0 Normal Transit</div>')
 
