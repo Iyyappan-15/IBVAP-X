@@ -145,8 +145,8 @@ playback_speed_preset = st.sidebar.radio(
         "🏃 Video Speed (10 FPS — 0.1s / frame)",
         "⚡ Fast Preview (20 FPS)",
     ],
-    index=0,
-    help="Select playback speed for comfortable operator inspection. Default is 1 FPS Step-by-Step.",
+    index=2,
+    help="Select playback speed for operator inspection. Default is 10 FPS Video Speed.",
 )
 
 if "1 FPS" in playback_speed_preset:
@@ -158,14 +158,24 @@ elif "10 FPS" in playback_speed_preset:
 else:
     preset_fps_val = 20
 
+# Synchronize slider with preset radio selection
+if "last_speed_preset" not in st.session_state:
+    st.session_state["last_speed_preset"] = playback_speed_preset
+    st.session_state["playback_fps_val"] = preset_fps_val
+elif st.session_state["last_speed_preset"] != playback_speed_preset:
+    st.session_state["last_speed_preset"] = playback_speed_preset
+    st.session_state["playback_fps_val"] = preset_fps_val
+
 playback_fps = st.sidebar.slider(
     "Fine-Tune Playback Rate (FPS)",
     min_value=1,
     max_value=30,
-    value=preset_fps_val,
+    value=st.session_state.get("playback_fps_val", preset_fps_val),
     step=1,
+    key="playback_fps_slider",
     help="Controls the visual animation rendering rate down to 1 frame per second for detailed inspection.",
 )
+st.session_state["playback_fps_val"] = playback_fps
 
 processing_mode = st.sidebar.radio(
     "Frame Evaluation Scope",
@@ -255,11 +265,13 @@ else:
 if "Border" in prompt_preset_choice:
     active_prompt_list = [
         "person", "dog", "vehicle", "fence", "chain link fence", "gate",
-        "rock", "stone", "backpack", "bicycle", "motorcycle", "pole", "border marker"
+        "rock", "stone", "backpack", "bicycle", "motorcycle", "pole", "border marker",
+        "gas cylinder", "cylinder", "tank"
     ]
 elif "General" in prompt_preset_choice:
     active_prompt_list = [
-        "person", "car", "truck", "bus", "motorcycle", "bicycle", "dog", "cat", "backpack", "bag"
+        "person", "car", "truck", "bus", "motorcycle", "bicycle", "dog", "cat", "backpack", "bag", "handbag",
+        "gas cylinder", "cylinder", "bottle", "tank"
     ]
 else:
     active_prompt_list = [p.strip() for p in custom_prompts_input.split(",") if p.strip()]
@@ -522,9 +534,23 @@ if start_clicked and selected_file_path:
         total_frames = getattr(source, "total_frames", 500)
         source_fps = getattr(source, "fps", 25.0)
 
-        process_interval = 1 if "100%" in processing_mode else max(1, int(round(source_fps / 10.0)))
-        # Enforce minimum 25ms cooperative sleep to yield CPU cycles and prevent cloud throttling
-        frame_delay = max(0.025, 1.0 / float(playback_fps))
+        target_playback_fps = float(playback_fps)
+        is_high_precision = "100%" in processing_mode
+
+        if is_high_precision:
+            process_interval = 1
+            # Adaptive detection cadence: run heavy YOLO on keyframes when high playback speed is requested,
+            # using tracking on intermediate frames to maintain smooth 10-20 FPS video animation without CPU stalls
+            if target_playback_fps >= 18:
+                detect_cadence = 3
+            elif target_playback_fps >= 7:
+                detect_cadence = 2
+            else:
+                detect_cadence = 1
+        else:
+            # Fast Sampling: skip video frames according to source FPS vs target playback FPS
+            process_interval = max(1, int(round(source_fps / max(1.0, target_playback_fps))))
+            detect_cadence = 1
 
         frame_idx = 0
         processed_count = 0
@@ -565,6 +591,7 @@ if start_clicked and selected_file_path:
                 if img is None:
                     continue
 
+                t_frame_start = time.time()
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 curr_lum = float(np.mean(gray))
                 curr_sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
@@ -573,8 +600,13 @@ if start_clicked and selected_file_path:
 
                 infer_img, was_resized = resize_for_inference(img)
 
+                # Determine whether this frame runs full YOLO or propagates tracking
+                should_skip_detection = (detect_cadence > 1) and ((processed_count % detect_cadence) != 0)
+
                 try:
-                    annotated, new_alerts = pipeline.process_frame(source, frame_obj, infer_img)
+                    annotated, new_alerts = pipeline.process_frame(
+                        source, frame_obj, infer_img, skip_detection=should_skip_detection
+                    )
                     if was_resized:
                         annotated = cv2.resize(
                             annotated,
@@ -727,9 +759,16 @@ if start_clicked and selected_file_path:
                     rel_deg = getattr(settings, "RELIABILITY_DEGRADED_THRESHOLD", 50.0)
                     rel_badge = "GOOD" if last_reliability_pct >= rel_good else ("DEGRADED" if last_reliability_pct >= rel_deg else "POOR")
 
-                stat_rel.metric("Camera Reliability", f"{last_reliability_pct:.0f}% [{rel_badge}]")
+                # Adaptive frame pacing: sleep only remainder needed to hit exact target playback rate
+                t_frame_work = time.time() - t_frame_start
+                t_frame_target = 1.0 / max(1.0, target_playback_fps)
+                sleep_needed = t_frame_target - t_frame_work
 
-                time.sleep(frame_delay)
+                if sleep_needed > 0.002:
+                    time.sleep(sleep_needed)
+                else:
+                    # Cooperative micro-yield for browser UI responsiveness
+                    time.sleep(0.001)
 
         except Exception as err:
             logger.error("Analysis loop error: %s", err)

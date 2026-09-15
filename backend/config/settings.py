@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     YOLO_CONFIDENCE_THRESHOLD: float = 0.20
     YOLO_IOU_THRESHOLD: float = 0.45
     YOLO_IMAGE_SIZE: int = 640
-    YOLO_DETECT_CLASSES: str = "person,dog,cat,bottle,car,motorcycle,bus,truck,backpack,handbag,suitcase,knife,cell phone,cup,chair"
+    YOLO_DETECT_CLASSES: str = "person,dog,cat,bottle,car,motorcycle,bus,truck,backpack,handbag,suitcase,knife,cell phone,cup,chair,cylinder,gas cylinder"
     CUSTOM_MODEL_PATH: str = "data/models/ibvapx_custom.pt"
     CUSTOM_CLASSES: str = "fence,stone"
 

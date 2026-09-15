@@ -341,6 +341,10 @@ class ObjectDetector:
                 )
                 raw_detections.append(det)
 
+        # Pre-refine raw detections (quadrupeds and cylinders) before containment suppression
+        h, w = image_np.shape[:2]
+        raw_detections = refine_detection_classes(raw_detections, h, w, image_np=image_np)
+
         # 2. Apply Sub-Box Containment Suppression
         clean_detections = suppress_nested_subboxes(raw_detections, containment_threshold=0.35)
 
@@ -381,9 +385,8 @@ class ObjectDetector:
         # 5. Final containment suppression to eliminate any sub-boxes inside persons
         clean_detections = suppress_nested_subboxes(clean_detections, containment_threshold=0.35)
 
-        # 6. Refine Quadruped Animals & Physical Aspect Ratios
-        h, w = image_np.shape[:2]
-        clean_detections = refine_detection_classes(clean_detections, h, w)
+        # 6. Refine Quadruped Animals, Cylinders & Physical Aspect Ratios
+        clean_detections = refine_detection_classes(clean_detections, h, w, image_np=image_np)
 
         return clean_detections
 
@@ -567,18 +570,26 @@ class ObjectDetector:
         return animal_dets
 
 
-def refine_detection_classes(detections: List[Detection], img_height: int, img_width: int) -> List[Detection]:
+def refine_detection_classes(
+    detections: List[Detection],
+    img_height: int,
+    img_width: int,
+    image_np: Optional[np.ndarray] = None
+) -> List[Detection]:
     """
     Refines class labels for detections based on physical aspect ratios, relative scale, and biomechanical geometry.
-    Guarantees that quadruped animals (dogs/cats) are NEVER misclassified as 'person'.
+    Guarantees that:
+      1. Quadruped animals (dogs/cats) are NEVER misclassified as 'person'.
+      2. Inanimate metal cylinders / gas cylinders are NEVER misclassified as 'person'.
+      3. Standing industrial containers/bottles (height >= 15% image or standing on floor) are classified as 'gas cylinder'.
     """
     if not detections:
         return detections
 
-    # Identify true upright human detections (aspect ratio height/width >= 1.50)
+    # Identify true upright human detections (aspect ratio height/width between 1.50 and 3.40)
     tall_persons = [
         d for d in detections 
-        if d.class_name == "person" and (d.bbox[3] - d.bbox[1]) / max(1.0, d.bbox[2] - d.bbox[0]) >= 1.50
+        if d.class_name == "person" and 1.50 <= (d.bbox[3] - d.bbox[1]) / max(1.0, d.bbox[2] - d.bbox[0]) <= 3.40
     ]
     max_person_h = max((d.bbox[3] - d.bbox[1] for d in tall_persons), default=0.0)
 
@@ -589,21 +600,60 @@ def refine_detection_classes(detections: List[Detection], img_height: int, img_w
         bh = max(1.0, y2 - y1)
         aspect_ratio = bh / bw  # Height / Width
 
-        if d.class_name == "person":
-            # Condition 1: Comparative scale against upright person in the same scene
-            # A dog next to a person is much shorter (<55% height) and horizontal/compact
+        # ── 1. BOTTLE -> CYLINDER / GAS CYLINDER ────────────────────────────
+        # Drinking bottles are small (<80px, <12% frame height, held in hand/table).
+        # Standing industrial / LPG gas cylinders are large (>90px or >15% frame or >30% person height).
+        if d.class_name == "bottle":
+            is_large_bottle = (bh >= 90) or (bh >= 0.15 * img_height) or (max_person_h > 0 and bh >= 0.30 * max_person_h)
+            is_standing_cylinder = (bh >= 80) and (aspect_ratio >= 1.6) and (y2 > img_height * 0.50)
+            if is_large_bottle or is_standing_cylinder:
+                d.class_name = "gas cylinder"
+                d.class_id = 81
+                d.confidence = max(0.65, d.confidence)
+
+        # ── 2. PERSON REFINEMENT (ANIMALS & CYLINDERS) ───────────────────────
+        elif d.class_name == "person":
+            # Check A: Quadruped Animal (Horizontal body AR <= 1.25)
             is_relative_small = (max_person_h > 0) and (bh < 0.55 * max_person_h) and (aspect_ratio <= 1.25)
-
-            # Condition 2: Biomechanical geometry: quadruped animals have horizontal/compact body (aspect ratio <= 1.25)
-            # A standing or walking person is tall (AR >= 1.4); a quadruped is horizontal (AR <= 1.25)
             is_horizontal_animal = (aspect_ratio <= 1.25) and (y2 > img_height * 0.30) and (bh < img_height * 0.40)
-
-            # Condition 3: Ground-level compact blob (height < 20% of entire frame and wide/horizontal)
             is_ground_blob = (bh < img_height * 0.20) and (y2 > img_height * 0.45) and (aspect_ratio <= 1.15)
 
             if is_relative_small or is_horizontal_animal or is_ground_blob:
                 d.class_name = "dog"
                 d.class_id = 16
+            else:
+                # Check B: Gas Cylinder misclassified as Person
+                # B1: Extreme vertical aspect ratio (AR >= 3.5). Biologically humans are AR 1.8 - 3.2.
+                is_extreme_cylinder_ar = (aspect_ratio >= 3.5) and (y2 > img_height * 0.35)
+
+                # B2: Visual verification if image crop is available
+                is_visual_cylinder = False
+                if image_np is not None and (aspect_ratio >= 1.8) and (y2 > img_height * 0.40):
+                    try:
+                        crop = image_np[max(0, int(y1)):min(img_height, int(y2)), max(0, int(x1)):min(img_width, int(x2))]
+                        if crop.size > 0 and crop.shape[0] >= 30 and crop.shape[1] >= 15:
+                            ch, cw = crop.shape[:2]
+                            # Check head area (top 25%) for skin tone
+                            head = crop[:int(ch * 0.25), :]
+                            ycrcb = cv2.cvtColor(head, cv2.COLOR_BGR2YCrCb)
+                            skin = (ycrcb[:,:,1] >= 133) & (ycrcb[:,:,1] <= 173) & (ycrcb[:,:,2] >= 77) & (ycrcb[:,:,2] <= 127)
+                            skin_ratio = float(np.mean(skin))
+
+                            # Cylinders have low/zero skin tone in head (< 30%) and strong vertical outer edges
+                            if skin_ratio < 0.30:
+                                gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                                edges = cv2.Canny(gray, 40, 120)
+                                l_density = float(np.mean(edges[:, :max(1, int(cw * 0.25))]))
+                                r_density = float(np.mean(edges[:, max(0, int(cw * 0.75)):]))
+                                if l_density > 8.0 or r_density > 8.0 or is_extreme_cylinder_ar:
+                                    is_visual_cylinder = True
+                    except Exception:
+                        pass
+
+                if is_extreme_cylinder_ar or is_visual_cylinder:
+                    d.class_name = "gas cylinder"
+                    d.class_id = 81
+                    d.confidence = max(0.65, d.confidence)
 
         refined.append(d)
 

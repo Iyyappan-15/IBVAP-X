@@ -61,12 +61,14 @@ class IBVAPXPipeline:
         self,
         video_source: VideoSource,
         frame_obj: Frame,
-        image_np: np.ndarray
+        image_np: np.ndarray,
+        skip_detection: bool = False
     ) -> Tuple[np.ndarray, List[AlertOutput]]:
         """
         Executes single-frame intelligence pipeline.
         Returns Tuple[annotated_image_np, list_of_new_alerts].
         Backwards-compatible signature, updates self.last_frame_result.
+        Supports skip_detection=True for high-speed tracking cadence.
         """
         # Apply programmatic degradation if demo mode active
         if self.enable_demo_degradation:
@@ -85,15 +87,18 @@ class IBVAPXPipeline:
         self.last_reliability = rel_score
 
         # 2. Object Detection (YOLO + clean detections)
-        detections = self.detector.detect(frame_obj, image_np=image_np)
-        self.last_detections = detections
+        if not skip_detection or not hasattr(self, "last_detections") or self.last_detections is None:
+            detections = self.detector.detect(frame_obj, image_np=image_np)
+            self.last_detections = detections
+        else:
+            detections = self.last_detections
 
         # 3. Multi-Object Tracking (ByteTrack / IoU Fallback)
         tracks = self.tracker.update(detections, timestamp=frame_obj.timestamp)
 
         # 3b. Dual-Path Open-Vocabulary Semantic Discovery & Refinement
         open_vocab_dets = []
-        if getattr(self, "open_vocab_engine", None) and self.open_vocab_engine.is_available:
+        if not skip_detection and getattr(self, "open_vocab_engine", None) and self.open_vocab_engine.is_available:
             # Operation 1: Track Crop Refinement on active tracks
             refined = self.open_vocab_engine.refine_track_crops(
                 image_np, tracks,

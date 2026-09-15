@@ -170,7 +170,7 @@ class ObjectTracker:
 
         try:
             import supervision as sv
-            self.sv_tracker = sv.ByteTrack(frame_rate=30)
+            self.sv_tracker = sv.ByteTrack(frame_rate=30, track_activation_threshold=0.18)
             logger.info("[Tracker] Supervision ByteTrack initialised.")
         except Exception as exc:
             logger.warning("[Tracker] ByteTrack unavailable (%s). Using IoU fallback.", exc)

@@ -23,11 +23,13 @@ class OpenVocabEngine:
     PROMPT_PRESETS: Dict[str, List[str]] = {
         "perimeter": [
             "person", "dog", "vehicle", "fence", "chain link fence", "gate",
-            "rock", "stone", "backpack", "bicycle", "motorcycle", "pole", "border marker"
+            "rock", "stone", "backpack", "bicycle", "motorcycle", "pole", "border marker",
+            "gas cylinder", "cylinder", "lpg cylinder", "tank"
         ],
         "general": [
             "person", "car", "truck", "bus", "motorcycle", "bicycle",
-            "dog", "cat", "backpack", "bag"
+            "dog", "cat", "backpack", "bag", "handbag",
+            "gas cylinder", "cylinder", "bottle", "tank"
         ]
     }
 

@@ -214,3 +214,72 @@ def test_fence_detector_rejects_sky_fog_images():
 
     results = fd.detect_fence(fog_img)
     assert len(results) == 0  # Zero false positive fence in sky!
+
+
+def test_refine_detection_classes_cylinder_vs_person():
+    """Verifies that an extreme vertical cylindrical object is classified as gas cylinder, not person."""
+    from backend.detection.detector import refine_detection_classes
+
+    upright_person = Detection(
+        class_id=0, class_name="person", confidence=0.88,
+        bbox=[100.0, 100.0, 180.0, 320.0],  # w=80, h=220, AR=2.75 (standard human)
+        camera_id="CAM-01", timestamp=time.time(), frame_id=1
+    )
+    gas_cylinder_misclassified_as_person = Detection(
+        class_id=0, class_name="person", confidence=0.75,
+        bbox=[400.0, 50.0, 460.0, 400.0],  # w=60, h=350, AR=5.83 (extreme vertical cylinder)
+        camera_id="CAM-01", timestamp=time.time(), frame_id=1
+    )
+
+    refined = refine_detection_classes(
+        [upright_person, gas_cylinder_misclassified_as_person],
+        img_height=600, img_width=800
+    )
+    assert refined[0].class_name == "person"
+    assert refined[1].class_name == "gas cylinder"
+    assert refined[1].class_id == 81
+    assert refined[1].confidence >= 0.65
+
+
+def test_refine_detection_classes_large_bottle_to_gas_cylinder():
+    """Verifies that large standing bottles are re-classified as gas cylinder."""
+    from backend.detection.detector import refine_detection_classes
+
+    small_handheld_bottle = Detection(
+        class_id=39, class_name="bottle", confidence=0.70,
+        bbox=[120.0, 200.0, 150.0, 260.0],  # w=30, h=60 (small drinking bottle)
+        camera_id="CAM-01", timestamp=time.time(), frame_id=1
+    )
+    large_standing_lpg_tank = Detection(
+        class_id=39, class_name="bottle", confidence=0.60,
+        bbox=[300.0, 150.0, 380.0, 420.0],  # w=80, h=270, AR=3.37 (large standing cylinder)
+        camera_id="CAM-01", timestamp=time.time(), frame_id=1
+    )
+
+    refined = refine_detection_classes(
+        [small_handheld_bottle, large_standing_lpg_tank],
+        img_height=600, img_width=800
+    )
+    assert refined[0].class_name == "bottle"
+    assert refined[1].class_name == "gas cylinder"
+    assert refined[1].class_id == 81
+
+
+def test_pipeline_skip_detection_cadence():
+    """Verifies that pipeline.process_frame supports skip_detection=True for high FPS tracking."""
+    from backend.pipeline import IBVAPXPipeline
+    from backend.interfaces import Frame
+
+    pipeline = IBVAPXPipeline()
+    dummy_img = np.zeros((480, 640, 3), dtype=np.uint8)
+    frame1 = Frame(camera_id="CAM-01", frame_id=1, timestamp=1.0, frame_bytes=b"", source_type="file")
+    frame2 = Frame(camera_id="CAM-01", frame_id=2, timestamp=1.05, frame_bytes=b"", source_type="file")
+
+    # Frame 1 with detection
+    annotated1, alerts1 = pipeline.process_frame(None, frame1, dummy_img, skip_detection=False)
+    assert annotated1 is not None
+
+    # Frame 2 with skip_detection=True (fast cadence)
+    annotated2, alerts2 = pipeline.process_frame(None, frame2, dummy_img, skip_detection=True)
+    assert annotated2 is not None
+
