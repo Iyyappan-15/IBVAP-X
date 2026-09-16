@@ -100,19 +100,27 @@ class IBVAPXPipeline:
         # 3b. Dual-Path Open-Vocabulary Semantic Discovery & Refinement
         open_vocab_dets = []
         if not skip_detection and getattr(self, "open_vocab_engine", None) and self.open_vocab_engine.is_available:
-            # Operation 1: Track Crop Refinement on active tracks
-            refined = self.open_vocab_engine.refine_track_crops(
-                image_np, tracks,
-                camera_id=frame_obj.camera_id,
-                timestamp=frame_obj.timestamp,
-                frame_id=frame_obj.frame_id
-            )
-            if refined:
-                open_vocab_dets.extend(refined)
+            # Operation 1: Track Crop Refinement — only refine newly acquired/unconfirmed tracks (max 1/frame)
+            if not hasattr(self, "_stabilized_track_ids"):
+                self._stabilized_track_ids = set()
+            unrefined_tracks = [t for t in tracks if t.track_id not in self._stabilized_track_ids]
+            if unrefined_tracks:
+                refined = self.open_vocab_engine.refine_track_crops(
+                    image_np, [unrefined_tracks[0]],
+                    camera_id=frame_obj.camera_id,
+                    timestamp=frame_obj.timestamp,
+                    frame_id=frame_obj.frame_id
+                )
+                if refined:
+                    open_vocab_dets.extend(refined)
+                self._stabilized_track_ids.add(unrefined_tracks[0].track_id)
 
             # Operation 2: Full-Frame Keyframe Discovery on interval
             interval_sec = getattr(settings, "SMART_DETECTION_INTERVAL_SECONDS", 2.0)
-            if (frame_obj.timestamp - self.last_keyframe_time >= interval_sec) or (self.last_keyframe_time == 0.0):
+            now_wall = time.time()
+            wall_elapsed = now_wall - getattr(self, "_last_full_scan_wall_time", 0.0)
+            is_initial = (self.last_keyframe_time == 0.0)
+            if is_initial or (wall_elapsed >= max(4.0, interval_sec * 2.0)):
                 discovered = self.open_vocab_engine.discover_full_frame(
                     image_np,
                     camera_id=frame_obj.camera_id,
@@ -122,6 +130,7 @@ class IBVAPXPipeline:
                 if discovered:
                     open_vocab_dets.extend(discovered)
                 self.last_keyframe_time = frame_obj.timestamp
+                self._last_full_scan_wall_time = now_wall
 
             if open_vocab_dets:
                 tracks = self.tracker.associate_open_vocab_detections(open_vocab_dets, timestamp=frame_obj.timestamp)

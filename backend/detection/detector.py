@@ -307,6 +307,7 @@ class ObjectDetector:
             conf=min(0.08, effective_conf),
             iou=0.45,
             agnostic_nms=True,
+            imgsz=640,
             classes=self.target_class_ids if self.target_class_ids else None,
             verbose=False
         )
@@ -361,26 +362,30 @@ class ObjectDetector:
             clean_detections.extend(handheld_dets)
 
         # 3b. Detect Ground Quadruped Animals on Snow/Light Backgrounds
-        ground_animal_dets = self._detect_ground_animals(
-            image_np,
-            clean_detections,
-            camera_id=frame_obj.camera_id,
-            timestamp=frame_obj.timestamp,
-            frame_id=frame_obj.frame_id
-        )
-        if ground_animal_dets:
-            clean_detections.extend(ground_animal_dets)
+        has_animal = any(d.class_name in ("dog", "cat") for d in clean_detections)
+        if not has_animal and (getattr(frame_obj, "frame_id", 1) % 3 == 1):
+            ground_animal_dets = self._detect_ground_animals(
+                image_np,
+                clean_detections,
+                camera_id=frame_obj.camera_id,
+                timestamp=frame_obj.timestamp,
+                frame_id=frame_obj.frame_id
+            )
+            if ground_animal_dets:
+                clean_detections.extend(ground_animal_dets)
 
-        # 4. Detect Perimeter Fence & Boundary Structures
-        fence_dets = self.fence_detector.detect_fence(
-            image_np,
-            camera_id=frame_obj.camera_id,
-            timestamp=frame_obj.timestamp,
-            frame_id=frame_obj.frame_id,
-            existing_detections=clean_detections
-        )
-        if fence_dets:
-            clean_detections.extend(fence_dets)
+        # 4. Detect Perimeter Fence & Boundary Structures (Cached physical infrastructure)
+        fid = getattr(frame_obj, "frame_id", 1)
+        if (fid % 15 == 1) or not hasattr(self, "_cached_fence_dets") or self._cached_fence_dets is None:
+            self._cached_fence_dets = self.fence_detector.detect_fence(
+                image_np,
+                camera_id=frame_obj.camera_id,
+                timestamp=frame_obj.timestamp,
+                frame_id=frame_obj.frame_id,
+                existing_detections=clean_detections
+            )
+        if self._cached_fence_dets:
+            clean_detections.extend(self._cached_fence_dets)
 
         # 5. Final containment suppression to eliminate any sub-boxes inside persons
         clean_detections = suppress_nested_subboxes(clean_detections, containment_threshold=0.35)
@@ -426,7 +431,7 @@ class ObjectDetector:
             if (feet_y2 - feet_y1) >= 20 and (feet_x2 - feet_x1) >= 20:
                 feet_crop = image_np[feet_y1:feet_y2, feet_x1:feet_x2]
                 try:
-                    c_results = self.model(feet_crop, conf=0.08, verbose=False)
+                    c_results = self.model(feet_crop, conf=0.08, imgsz=160, verbose=False)
                     for cr in c_results:
                         if cr.boxes is not None and len(cr.boxes) > 0:
                             for cbox in cr.boxes:
@@ -538,7 +543,7 @@ class ObjectDetector:
                                 cx2 = min(w, int(abs_x2) + pad)
                                 if (cy2 - cy1) >= 16 and (cx2 - cx1) >= 16:
                                     animal_crop = image_np[cy1:cy2, cx1:cx2]
-                                    c_results = self.model(animal_crop, conf=0.08, verbose=False)
+                                    c_results = self.model(animal_crop, conf=0.08, imgsz=160, verbose=False)
                                     for cr in c_results:
                                         if cr.boxes is not None and len(cr.boxes) > 0:
                                             c_id = int(cr.boxes.cls[0].cpu().numpy())
@@ -620,24 +625,24 @@ def refine_detection_classes(
             if aspect_ratio <= 1.25 and (y2 > img_height * 0.30) and (bh < img_height * 0.40):
                 is_animal = True
 
-            # Case B: Climbing / perched small animal (e.g. cat on fence/gate)
-            # Physical signature: small body (bh <= 65, bw <= 35), elevated or adjacent to a reference human,
-            # where the human is > 2.0x taller, confirming this small entity is an animal, NOT an adult human.
-            elif tall_persons and d not in tall_persons and (bh <= 65.0) and (bw <= 35.0):
+            # Case B: Climbing / perched small animal (e.g. cat/dog on fence/gate)
+            # Physical signature: small body (bh <= 85, bw <= 60), elevated or adjacent to a reference human,
+            # where the human is > 1.8x taller, confirming this small entity is an animal, NOT an adult human.
+            elif tall_persons and d not in tall_persons and (bh <= 85.0) and (bw <= 60.0):
                 nearest_person = min(tall_persons, key=lambda tp: abs((tp.bbox[0] + tp.bbox[2])/2.0 - (x1 + x2)/2.0))
                 n_x1, n_y1, n_x2, n_y2 = nearest_person.bbox
                 n_h = n_y2 - n_y1
                 dx = abs((n_x1 + n_x2)/2.0 - (x1 + x2)/2.0)
 
-                # If adjacent to a tall person (dx <= 220px) and less than 50% of their height:
+                # If adjacent to a tall person (dx <= 240px) and less than 55% of their height:
                 # it is a climbing animal / pet on the fence/gate, not a human
-                if dx <= 220.0 and (bh < 0.50 * n_h):
+                if dx <= 240.0 and (bh < 0.55 * n_h):
                     is_animal = True
-                # Perspective check: if at similar depth or foreground (y2 > img_height * 0.40) but height < 45% of expected human
+                # Perspective check: if at similar depth or foreground (y2 > img_height * 0.40) but height < 48% of expected human
                 elif y2 > img_height * 0.40:
                     y_horiz = max(0.0, 0.20 * img_height)
                     expected_h = n_h * max(0.25, (y2 - y_horiz) / max(1.0, n_y2 - y_horiz))
-                    if (bh / max(1.0, expected_h)) < 0.45:
+                    if (bh / max(1.0, expected_h)) < 0.48:
                         is_animal = True
 
             # Case C: Isolated small ground blob when no reference human is present

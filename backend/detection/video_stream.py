@@ -149,7 +149,8 @@ class FileVideoSource(VideoSource):
             "width": self.width,
             "height": self.height,
             "fps": self.fps,
-            "total_frames": self.total_frames
+            "total_frames": self.total_frames,
+            "frame_img": frame_img
         }
 
         return Frame(

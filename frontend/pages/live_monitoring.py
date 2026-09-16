@@ -180,11 +180,11 @@ st.session_state["playback_fps_val"] = playback_fps
 processing_mode = st.sidebar.radio(
     "Frame Evaluation Scope",
     [
-        "🎯 High Precision (100% Every Frame)",
-        "⚡ Fast Sampling (Sampled ~10 FPS)",
+        "⚡ Real-Time Paced (Adaptive 10 FPS — Fluid Playback)",
+        "🎯 Exhaustive Full-Scan (100% Every Frame — Forensic Inspection)",
     ],
     index=0,
-    help="High Precision processes and displays every frame sequentially with zero skipping.",
+    help="Real-Time Paced dynamically strides and uses keyframe tracking for smooth 10+ FPS playback. Full-Scan processes every frame sequentially.",
 )
 
 demo_degraded = st.sidebar.checkbox(
@@ -534,22 +534,27 @@ if start_clicked and selected_file_path:
         source_fps = getattr(source, "fps", 25.0)
 
         target_playback_fps = float(playback_fps)
-        is_high_precision = "100%" in processing_mode
+        is_exhaustive = "100%" in processing_mode or "Exhaustive" in processing_mode
 
-        if is_high_precision:
+        if is_exhaustive:
             process_interval = 1
-            # Adaptive detection cadence: run heavy YOLO on keyframes when high playback speed is requested,
-            # using tracking on intermediate frames to maintain smooth 10-20 FPS video animation without CPU stalls
+            # Adaptive detection cadence on exhaustive scans
             if target_playback_fps >= 18:
-                detect_cadence = 3
+                detect_cadence = 4
             elif target_playback_fps >= 7:
-                detect_cadence = 2
+                detect_cadence = 3
             else:
                 detect_cadence = 1
         else:
-            # Fast Sampling: skip video frames according to source FPS vs target playback FPS
+            # Real-Time Paced: dynamically stride frames so playback matches target wall-clock speed
             process_interval = max(1, int(round(source_fps / max(1.0, target_playback_fps))))
-            detect_cadence = 1
+            # For 10 FPS and above, decouple keyframe YOLO from lightweight ByteTrack tracking
+            if target_playback_fps >= 10:
+                detect_cadence = 3
+            elif target_playback_fps >= 4:
+                detect_cadence = 2
+            else:
+                detect_cadence = 1
 
         frame_idx = 0
         processed_count = 0
@@ -585,8 +590,11 @@ if start_clicked and selected_file_path:
                 if (frame_idx - 1) % process_interval != 0:
                     continue
 
-                nparr = np.frombuffer(frame_obj.frame_bytes, np.uint8)
-                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if getattr(frame_obj, "source_metadata", None) and "frame_img" in frame_obj.source_metadata and frame_obj.source_metadata["frame_img"] is not None:
+                    img = frame_obj.source_metadata["frame_img"]
+                else:
+                    nparr = np.frombuffer(frame_obj.frame_bytes, np.uint8)
+                    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                 if img is None:
                     continue
 
@@ -710,6 +718,17 @@ if start_clicked and selected_file_path:
                         if r not in feed_reasons_collected:
                             feed_reasons_collected.append(r)
 
+                # Calculate live Camera Reliability status
+                rel_good = getattr(settings, "RELIABILITY_GOOD_THRESHOLD", 80.0)
+                rel_deg = getattr(settings, "RELIABILITY_DEGRADED_THRESHOLD", 50.0)
+                rel_obj = getattr(pipeline, "last_reliability", None)
+                if rel_obj and hasattr(rel_obj, "status"):
+                    rel_status_val = getattr(rel_obj.status, "value", str(rel_obj.status))
+                    rel_badge = str(rel_status_val).replace("CameraStatus.", "").replace("CAMERASTATUS.", "")
+                else:
+                    rel_badge = "GOOD" if last_reliability_pct >= rel_good else ("DEGRADED" if last_reliability_pct >= rel_deg else "POOR")
+                rel_color = "#4ade80" if rel_badge == "GOOD" else ("#fb923c" if rel_badge == "DEGRADED" else "#f87171")
+
                 # Overlay banner
                 cv2.rectangle(annotated, (0, 0), (annotated.shape[1], 26), (15, 23, 42), -1)
                 cv2.putText(
@@ -729,8 +748,9 @@ if start_clicked and selected_file_path:
                 frame_placeholder.markdown(
                     f"""<div style="background-color: #0b0f19; padding: 4px; border-radius: 6px; border: 1px solid #1e293b; text-align: center;">
                         <img src="data:image/jpeg;base64,{b64_frame}" style="width: 100%; max-height: 500px; object-fit: contain; border-radius: 4px;" />
-                        <div style="display: flex; justify-content: space-between; padding: 4px 8px; font-size: 12px; font-family: monospace; color: #38bdf8; background: #0f172a; border-radius: 4px; margin-top: 4px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 12px; font-size: 12px; font-family: monospace; color: #38bdf8; background: #0f172a; border-radius: 4px; margin-top: 4px;">
                             <span>🔴 <b>LIVE STREAM</b> · {camera_id}</span>
+                            <span style="color: {rel_color};">🛡️ <b>CAMERA RELIABILITY:</b> {last_reliability_pct:.0f}% [{rel_badge}]</span>
                             <span>Frame <b>{frame_idx}</b> / {total_frames}</span>
                         </div>
                     </div>""",
@@ -743,24 +763,20 @@ if start_clicked and selected_file_path:
                 frame_res = getattr(pipeline, "last_frame_result", None)
                 current_dets = frame_res.current_detections if frame_res else getattr(pipeline, "last_detections", [])
 
-                elapsed = time.time() - loop_start
-                live_fps = processed_count / elapsed if elapsed > 0 else 0.0
-                stat_frames.metric("Frames", f"{frame_idx}/{total_frames}")
-                stat_fps.metric("Processing FPS", f"{live_fps:.1f}")
-                active_det_count = len(current_dets) if len(current_dets) > 0 else len(active_t)
-                stat_objs.metric("Detections", active_det_count)
-                stat_tracks.metric("Active Tracks", len(active_t))
-                unique_alert_tracks = len(set(a.get("track_id") for a in all_alerts_collected))
-                stat_alerts.metric("Alert Incidents", unique_alert_tracks)
-
-                rel_obj = getattr(pipeline, "last_reliability", None)
-                if rel_obj and hasattr(rel_obj, "status"):
-                    rel_status_val = getattr(rel_obj.status, "value", str(rel_obj.status))
-                    rel_badge = str(rel_status_val).replace("CameraStatus.", "").replace("CAMERASTATUS.", "")
-                else:
-                    rel_good = getattr(settings, "RELIABILITY_GOOD_THRESHOLD", 80.0)
-                    rel_deg = getattr(settings, "RELIABILITY_DEGRADED_THRESHOLD", 50.0)
-                    rel_badge = "GOOD" if last_reliability_pct >= rel_good else ("DEGRADED" if last_reliability_pct >= rel_deg else "POOR")
+                # Batch telemetry metric updates every 3 frames to prevent WebSocket congestion on Cloud
+                is_last_frame = (frame_idx >= total_frames) or (not source.is_connected)
+                should_update_metrics = (processed_count % 3 == 0) or is_last_frame or (len(new_alerts) > 0)
+                if should_update_metrics:
+                    elapsed = time.time() - loop_start
+                    live_fps = processed_count / elapsed if elapsed > 0 else 0.0
+                    stat_frames.metric("Frames", f"{frame_idx}/{total_frames}")
+                    stat_fps.metric("Processing FPS", f"{live_fps:.1f}")
+                    active_det_count = len(current_dets) if len(current_dets) > 0 else len(active_t)
+                    stat_objs.metric("Detections", active_det_count)
+                    stat_tracks.metric("Active Tracks", len(active_t))
+                    unique_alert_tracks = len(set(a.get("track_id") for a in all_alerts_collected))
+                    stat_alerts.metric("Alert Incidents", unique_alert_tracks)
+                    stat_rel.metric("Camera Reliability", f"{last_reliability_pct:.0f}% [{rel_badge}]")
 
                 # Adaptive frame pacing: sleep only remainder needed to hit exact target playback rate
                 t_frame_work = time.time() - t_frame_start
