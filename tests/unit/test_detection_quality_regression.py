@@ -283,3 +283,53 @@ def test_pipeline_skip_detection_cadence():
     annotated2, alerts2 = pipeline.process_frame(None, frame2, dummy_img, skip_detection=True)
     assert annotated2 is not None
 
+
+def test_refine_detection_classes_perspective_scale_and_no_false_cylinders():
+    """Verifies perspective-aware scale calibration:
+    - Distant person in snow is preserved as 'person' (never false cylinder).
+    - Climbing animal on fence is refined to 'cat'.
+    - Slender fence posts (w < 35) are never turned into gas cylinders.
+    """
+    from backend.detection.detector import refine_detection_classes
+
+    # 1. Reference adult person in foreground: w=80, h=250, y2=350
+    foreground_person = Detection(
+        class_id=0, class_name="person", confidence=0.92,
+        bbox=[300.0, 100.0, 380.0, 350.0],
+        camera_id="CAM-01", timestamp=time.time(), frame_id=1
+    )
+    # 2. Distant walking person in snow: w=20, h=50, y2=200
+    distant_person = Detection(
+        class_id=0, class_name="person", confidence=0.78,
+        bbox=[600.0, 150.0, 620.0, 200.0],
+        camera_id="CAM-01", timestamp=time.time(), frame_id=1
+    )
+    # 3. Small animal climbing on fence: w=22, h=44, y2=185 (44px is ~40% of expected human at y2=185)
+    climbing_cat_on_fence = Detection(
+        class_id=0, class_name="person", confidence=0.72,
+        bbox=[150.0, 141.0, 172.0, 185.0],
+        camera_id="CAM-01", timestamp=time.time(), frame_id=1
+    )
+    # 4. Slender fence post misdetected as bottle: w=15, h=100
+    slender_post = Detection(
+        class_id=39, class_name="bottle", confidence=0.65,
+        bbox=[100.0, 150.0, 115.0, 250.0],
+        camera_id="CAM-01", timestamp=time.time(), frame_id=1
+    )
+
+    refined = refine_detection_classes(
+        [foreground_person, distant_person, climbing_cat_on_fence, slender_post],
+        img_height=480, img_width=640
+    )
+
+    # 1. Foreground person remains person
+    assert refined[0].class_name == "person"
+    # 2. Distant person in snow remains person (NEVER cylinder)
+    assert refined[1].class_name == "person"
+    # 3. Climbing animal on fence is correctly refined to cat
+    assert refined[2].class_name == "cat"
+    assert refined[2].class_id == 15
+    # 4. Slender fence post remains bottle (not upgraded to gas cylinder)
+    assert refined[3].class_name == "bottle"
+
+

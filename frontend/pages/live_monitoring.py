@@ -264,9 +264,8 @@ else:
 # Set active prompt preset
 if "Border" in prompt_preset_choice:
     active_prompt_list = [
-        "person", "dog", "vehicle", "fence", "chain link fence", "gate",
-        "rock", "stone", "backpack", "bicycle", "motorcycle", "pole", "border marker",
-        "gas cylinder", "cylinder", "tank"
+        "person", "dog", "cat", "vehicle", "fence", "chain link fence", "gate",
+        "rock", "stone", "backpack", "bicycle", "motorcycle", "pole", "border marker"
     ]
 elif "General" in prompt_preset_choice:
     active_prompt_list = [

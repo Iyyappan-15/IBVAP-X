@@ -577,21 +577,22 @@ def refine_detection_classes(
     image_np: Optional[np.ndarray] = None
 ) -> List[Detection]:
     """
-    Refines class labels for detections based on physical aspect ratios, relative scale, and biomechanical geometry.
+    Refines class labels for detections based on physical aspect ratios, relative scale,
+    ground-plane perspective projection, and biomechanical geometry.
     Guarantees that:
-      1. Quadruped animals (dogs/cats) are NEVER misclassified as 'person'.
-      2. Inanimate metal cylinders / gas cylinders are NEVER misclassified as 'person'.
-      3. Standing industrial containers/bottles (height >= 15% image or standing on floor) are classified as 'gas cylinder'.
+      1. Quadruped animals (dogs/cats) are NEVER misclassified as 'person' (including climbing fence postures).
+      2. Human persons (foreground or distant, in winter coats/hoodies) are NEVER misclassified as 'gas cylinder'.
+      3. Standing industrial containers/bottles (height >= 80px, width >= 35px on floor) are classified as 'gas cylinder'.
+      4. Slender fence posts / poles in fields are NOT misclassified as 'gas cylinder'.
     """
     if not detections:
         return detections
 
-    # Identify true upright human detections (aspect ratio height/width between 1.50 and 3.40)
+    # Identify true upright human reference detections (AR between 1.50 and 3.40, substantial height)
     tall_persons = [
         d for d in detections 
-        if d.class_name == "person" and 1.50 <= (d.bbox[3] - d.bbox[1]) / max(1.0, d.bbox[2] - d.bbox[0]) <= 3.40
+        if d.class_name == "person" and 1.50 <= (d.bbox[3] - d.bbox[1]) / max(1.0, d.bbox[2] - d.bbox[0]) <= 3.40 and (d.bbox[3] - d.bbox[1]) >= 70.0
     ]
-    max_person_h = max((d.bbox[3] - d.bbox[1] for d in tall_persons), default=0.0)
 
     refined: List[Detection] = []
     for d in detections:
@@ -602,55 +603,60 @@ def refine_detection_classes(
 
         # ── 1. BOTTLE -> CYLINDER / GAS CYLINDER ────────────────────────────
         # Drinking bottles are small (<80px, <12% frame height, held in hand/table).
-        # Standing industrial / LPG gas cylinders are large (>90px or >15% frame or >30% person height).
+        # Standing industrial / LPG gas cylinders are wide containers (bh >= 80, bw >= 30, AR <= 3.8, on ground).
         if d.class_name == "bottle":
-            is_large_bottle = (bh >= 90) or (bh >= 0.15 * img_height) or (max_person_h > 0 and bh >= 0.30 * max_person_h)
-            is_standing_cylinder = (bh >= 80) and (aspect_ratio >= 1.6) and (y2 > img_height * 0.50)
+            is_large_bottle = (bh >= 90) and (bw >= 30) and (1.6 <= aspect_ratio <= 3.8)
+            is_standing_cylinder = (bh >= 80) and (bw >= 35) and (1.6 <= aspect_ratio <= 3.5) and (y2 > img_height * 0.50)
             if is_large_bottle or is_standing_cylinder:
                 d.class_name = "gas cylinder"
                 d.class_id = 81
                 d.confidence = max(0.65, d.confidence)
 
-        # ── 2. PERSON REFINEMENT (ANIMALS & CYLINDERS) ───────────────────────
+        # ── 2. PERSON REFINEMENT (ANIMALS & EXTREME CYLINDERS) ───────────────
         elif d.class_name == "person":
-            # Check A: Quadruped Animal (Horizontal body AR <= 1.25)
-            is_relative_small = (max_person_h > 0) and (bh < 0.55 * max_person_h) and (aspect_ratio <= 1.25)
-            is_horizontal_animal = (aspect_ratio <= 1.25) and (y2 > img_height * 0.30) and (bh < img_height * 0.40)
-            is_ground_blob = (bh < img_height * 0.20) and (y2 > img_height * 0.45) and (aspect_ratio <= 1.15)
+            is_animal = False
 
-            if is_relative_small or is_horizontal_animal or is_ground_blob:
-                d.class_name = "dog"
-                d.class_id = 16
+            # Case A: Horizontal quadruped animal on the ground (dogs/quadrupeds)
+            if aspect_ratio <= 1.25 and (y2 > img_height * 0.30) and (bh < img_height * 0.40):
+                is_animal = True
+
+            # Case B: Climbing / perched small animal (e.g. cat on fence/gate)
+            # Physical signature: small body (bh <= 65, bw <= 35), elevated or adjacent to a reference human,
+            # where the human is > 2.0x taller, confirming this small entity is an animal, NOT an adult human.
+            elif tall_persons and d not in tall_persons and (bh <= 65.0) and (bw <= 35.0):
+                nearest_person = min(tall_persons, key=lambda tp: abs((tp.bbox[0] + tp.bbox[2])/2.0 - (x1 + x2)/2.0))
+                n_x1, n_y1, n_x2, n_y2 = nearest_person.bbox
+                n_h = n_y2 - n_y1
+                dx = abs((n_x1 + n_x2)/2.0 - (x1 + x2)/2.0)
+
+                # If adjacent to a tall person (dx <= 220px) and less than 50% of their height:
+                # it is a climbing animal / pet on the fence/gate, not a human
+                if dx <= 220.0 and (bh < 0.50 * n_h):
+                    is_animal = True
+                # Perspective check: if at similar depth or foreground (y2 > img_height * 0.40) but height < 45% of expected human
+                elif y2 > img_height * 0.40:
+                    y_horiz = max(0.0, 0.20 * img_height)
+                    expected_h = n_h * max(0.25, (y2 - y_horiz) / max(1.0, n_y2 - y_horiz))
+                    if (bh / max(1.0, expected_h)) < 0.45:
+                        is_animal = True
+
+            # Case C: Isolated small ground blob when no reference human is present
+            elif not tall_persons and (bh < img_height * 0.18) and (bh * bw < 0.02 * img_height * img_width) and (y2 > img_height * 0.45) and aspect_ratio <= 1.30:
+                is_animal = True
+
+            if is_animal:
+                # Vertical/climbing profile (e.g. cat climbing chain-link fence or upright): cat
+                # Horizontal quadruped profile (dog walking/standing): dog
+                if aspect_ratio >= 1.30:
+                    d.class_name = "cat"
+                    d.class_id = 15
+                else:
+                    d.class_name = "dog"
+                    d.class_id = 16
             else:
-                # Check B: Gas Cylinder misclassified as Person
-                # B1: Extreme vertical aspect ratio (AR >= 3.5). Biologically humans are AR 1.8 - 3.2.
-                is_extreme_cylinder_ar = (aspect_ratio >= 3.5) and (y2 > img_height * 0.35)
-
-                # B2: Visual verification if image crop is available
-                is_visual_cylinder = False
-                if image_np is not None and (aspect_ratio >= 1.8) and (y2 > img_height * 0.40):
-                    try:
-                        crop = image_np[max(0, int(y1)):min(img_height, int(y2)), max(0, int(x1)):min(img_width, int(x2))]
-                        if crop.size > 0 and crop.shape[0] >= 30 and crop.shape[1] >= 15:
-                            ch, cw = crop.shape[:2]
-                            # Check head area (top 25%) for skin tone
-                            head = crop[:int(ch * 0.25), :]
-                            ycrcb = cv2.cvtColor(head, cv2.COLOR_BGR2YCrCb)
-                            skin = (ycrcb[:,:,1] >= 133) & (ycrcb[:,:,1] <= 173) & (ycrcb[:,:,2] >= 77) & (ycrcb[:,:,2] <= 127)
-                            skin_ratio = float(np.mean(skin))
-
-                            # Cylinders have low/zero skin tone in head (< 30%) and strong vertical outer edges
-                            if skin_ratio < 0.30:
-                                gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-                                edges = cv2.Canny(gray, 40, 120)
-                                l_density = float(np.mean(edges[:, :max(1, int(cw * 0.25))]))
-                                r_density = float(np.mean(edges[:, max(0, int(cw * 0.75)):]))
-                                if l_density > 8.0 or r_density > 8.0 or is_extreme_cylinder_ar:
-                                    is_visual_cylinder = True
-                    except Exception:
-                        pass
-
-                if is_extreme_cylinder_ar or is_visual_cylinder:
+                # Non-human extreme vertical structures (AR >= 4.8, e.g. synthetic tall pipes/cylinders)
+                # Humans physically have AR between 1.5 and 3.4. AR >= 4.8 is mechanically non-human.
+                if aspect_ratio >= 4.8 and (y2 > img_height * 0.35):
                     d.class_name = "gas cylinder"
                     d.class_id = 81
                     d.confidence = max(0.65, d.confidence)

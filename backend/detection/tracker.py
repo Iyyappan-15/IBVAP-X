@@ -471,6 +471,11 @@ class ObjectTracker:
             "stone": (180, 0, 255),           # Purple/Violet
             "knife": (0, 0, 230),             # Red
             "weapon": (0, 0, 200),            # Dark Red
+            "gas cylinder": (200, 100, 255),  # Lavender / Magenta
+            "cylinder": (200, 100, 255),      # Lavender / Magenta
+            "tank": (200, 100, 255),          # Lavender / Magenta
+            "pole": (180, 180, 180),          # Cool Grey
+            "gate": (0, 200, 100),            # Mint Green
             "truck": (255, 100, 0),           # Deep Blue
             "bus": (200, 200, 0),             # Cyan
             "motorcycle": (0, 220, 255),      # Yellow
