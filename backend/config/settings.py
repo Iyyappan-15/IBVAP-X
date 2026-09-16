@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
     # Object Detection (YOLO & Open-Vocabulary)
     YOLO_MODEL_PATH: str = "data/models/yolov8n.pt"
-    YOLO_CONFIDENCE_THRESHOLD: float = 0.20
+    YOLO_CONFIDENCE_THRESHOLD: float = 0.30
     YOLO_IOU_THRESHOLD: float = 0.45
     YOLO_IMAGE_SIZE: int = 640
     YOLO_DETECT_CLASSES: str = "person,dog,cat,bottle,car,motorcycle,bus,truck,backpack,handbag,suitcase,knife,cell phone,cup,chair,cylinder,gas cylinder"

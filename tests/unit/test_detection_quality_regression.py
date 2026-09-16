@@ -333,3 +333,42 @@ def test_refine_detection_classes_perspective_scale_and_no_false_cylinders():
     assert refined[3].class_name == "bottle"
 
 
+def test_tracker_temporal_persistence_filtering_flickers():
+    """Verifies that transient single-frame and two-frame noise flickers are suppressed when min_persistence=3."""
+    from backend.detection.tracker import ObjectTracker
+    from backend.interfaces import Detection
+
+    tracker = ObjectTracker(min_persistence=3)
+    now = time.time()
+
+    flicker_det = Detection(
+        class_id=0, class_name="person", confidence=0.85,
+        bbox=[100.0, 100.0, 150.0, 200.0],
+        camera_id="CAM-01", timestamp=now, frame_id=1
+    )
+
+    # Frame 1: Single detection -> in probationary state (0 visible tracks)
+    tracks_f1 = tracker.update([flicker_det], timestamp=now)
+    assert len(tracks_f1) == 0
+
+    # Frame 2: Second frame -> still probationary (0 visible tracks)
+    flicker_det_f2 = Detection(
+        class_id=0, class_name="person", confidence=0.85,
+        bbox=[102.0, 101.0, 152.0, 201.0],
+        camera_id="CAM-01", timestamp=now + 0.1, frame_id=2
+    )
+    tracks_f2 = tracker.update([flicker_det_f2], timestamp=now + 0.1)
+    assert len(tracks_f2) == 0
+
+    # Frame 3: Confirmed persistence (3 frames) -> emitted as active Track!
+    flicker_det_f3 = Detection(
+        class_id=0, class_name="person", confidence=0.85,
+        bbox=[104.0, 102.0, 154.0, 202.0],
+        camera_id="CAM-01", timestamp=now + 0.2, frame_id=3
+    )
+    tracks_f3 = tracker.update([flicker_det_f3], timestamp=now + 0.2)
+    assert len(tracks_f3) == 1
+    assert tracks_f3[0].class_name == "person"
+
+
+

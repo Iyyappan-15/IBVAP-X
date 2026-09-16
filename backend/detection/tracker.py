@@ -46,9 +46,10 @@ def calculate_iou(box1: List[float], box2: List[float]) -> float:
 class PureIoUTracker:
     """Pure NumPy fallback tracker used when Supervision ByteTrack is unavailable."""
 
-    def __init__(self, max_stale_frames: int = 30, iou_threshold: float = 0.35):
+    def __init__(self, max_stale_frames: int = 30, iou_threshold: float = 0.35, min_persistence: int = 1):
         self.max_stale_frames = max_stale_frames
         self.iou_threshold = iou_threshold
+        self.min_persistence = min_persistence
         self.next_track_id = 1
         self.active_tracks: Dict[int, Dict] = {}
 
@@ -85,6 +86,7 @@ class PureIoUTracker:
                 track_data["bbox"] = bbox
                 track_data["last_seen"] = timestamp
                 track_data["stale_count"] = 0
+                track_data["frames_seen"] = track_data.get("frames_seen", 1) + 1
 
                 # Append to trajectory with teleportation guard
                 traj = track_data["trajectory"]
@@ -126,6 +128,7 @@ class PureIoUTracker:
                     "direction_vector": (0.0, 0.0),
                     "zone_history": [],
                     "stale_count": 0,
+                    "frames_seen": 1,
                 }
 
         # ── Evict stale tracks ─────────────────────────────────────────────
@@ -138,6 +141,8 @@ class PureIoUTracker:
         # ── Return active Track schema instances ───────────────────────────
         output: List[Track] = []
         for t_id, data in self.active_tracks.items():
+            if data.get("frames_seen", 1) < self.min_persistence:
+                continue
             output.append(
                 Track(
                     track_id=t_id,
@@ -162,9 +167,10 @@ class PureIoUTracker:
 class ObjectTracker:
     """Multi-Object Tracker: Supervision ByteTrack with Direct State & Pure IoU fallback."""
 
-    def __init__(self, max_stale_frames: int = None):
+    def __init__(self, max_stale_frames: int = None, min_persistence: int = 1):
         self.max_stale_frames = max_stale_frames or settings.TRACK_EVICTION_FRAMES
-        self.fallback_tracker = PureIoUTracker(max_stale_frames=self.max_stale_frames)
+        self.min_persistence = min_persistence
+        self.fallback_tracker = PureIoUTracker(max_stale_frames=self.max_stale_frames, min_persistence=self.min_persistence)
         self.active_tracks: Dict[int, Dict] = {}
         self.use_fallback = False
 
@@ -226,6 +232,7 @@ class ObjectTracker:
                             "direction_vector": (0.0, 0.0),
                             "zone_history": [],
                             "stale_count": 0,
+                            "frames_seen": 1,
                             "class_history": [(cname, 0.85)],
                             "label_stability": "HIGH",
                             "source": DetectionSource.YOLO
@@ -235,6 +242,7 @@ class ObjectTracker:
                         tdata["bbox"] = box
                         tdata["last_seen"] = timestamp
                         tdata["stale_count"] = 0
+                        tdata["frames_seen"] = tdata.get("frames_seen", 1) + 1
                         # Record class observation for label stabilization
                         tdata["class_history"].append((cname, 0.85))
                         if len(tdata["class_history"]) > 10:
@@ -319,6 +327,7 @@ class ObjectTracker:
                     "direction_vector": (0.0, 0.0),
                     "zone_history": [],
                     "stale_count": 0,
+                    "frames_seen": max(3, self.min_persistence),
                     "class_history": [(det.class_name, det.confidence * 1.5)],
                     "label_stability": "HIGH",
                     "source": DetectionSource.OPEN_VOCAB_DISCOVERY
@@ -370,7 +379,7 @@ class ObjectTracker:
         else:
             tdata["label_stability"] = "LOW"
 
-    def _build_track_outputs(self) -> List[Track]:
+    def _build_track_outputs(self, min_persistence: int = None) -> List[Track]:
         # Track-Level Containment Suppression: Evict nested partial sub-boxes (e.g. torso/arm inside full body)
         active_items = list(self.active_tracks.items())
 
@@ -423,8 +432,11 @@ class ObjectTracker:
             if sid in self.active_tracks:
                 del self.active_tracks[sid]
 
+        req_persistence = self.min_persistence if min_persistence is None else min_persistence
         output: List[Track] = []
         for t_id, data in self.active_tracks.items():
+            if data.get("frames_seen", 1) < req_persistence:
+                continue
             output.append(
                 Track(
                     track_id=t_id,

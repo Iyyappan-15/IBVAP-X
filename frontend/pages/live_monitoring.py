@@ -68,6 +68,7 @@ from backend.interfaces import (
 )
 from backend.scoring.priority_engine import PriorityEngine
 from backend.scoring.explanations import ExplanationGenerator
+from backend.scoring.narrative_engine import VideoNarrativeEngine
 from backend.evidence.hashing import EvidenceHasher
 from backend.evidence.audit import AuditLogger
 from backend.upload.video_validator import validate_upload, resize_for_inference
@@ -479,7 +480,7 @@ if start_clicked and selected_file_path:
             source = WebcamVideoSource(device_index=0, camera_id=camera_id)
         else:
             source = FileVideoSource(file_path=selected_file_path, camera_id=camera_id)
-        pipeline = IBVAPXPipeline(enable_demo_degradation=demo_degraded)
+        pipeline = IBVAPXPipeline(enable_demo_degradation=demo_degraded, min_track_persistence=3)
         if hasattr(pipeline, "open_vocab_engine") and pipeline.open_vocab_engine.is_available:
             pipeline.open_vocab_engine.set_classes(active_prompt_list)
     except Exception as e:
@@ -1053,15 +1054,51 @@ if st.session_state.get("ibvapx_analysis_done") and st.session_state.get("ibvapx
         )
         st.markdown(sig3_html, unsafe_allow_html=True)
 
-    # ── 3. SITUATIONAL NARRATIVE ("WHAT HAPPENED?") ──
-    what_happened_str = (
-        f"Detected entity **{alert_obj['class_name'].upper() if alert_obj else 'PERSON'}** (Track **#{alert_obj['track_id'] if alert_obj else '1'}**) "
-        f"in Sector **{s['camera_id']}**. Object entered restricted buffer zone during {'night' if is_night else 'day'} operations. "
-        f"Trajectory vector indicates {direction_desc.lower()} with sustained dwell time."
-        if (alert_obj or person_count > 0)
-        else "Perimeter clear. Zero anomalous entity or unauthorized boundary crossings observed across evaluated video sequence."
+    # ── 3. COMPLETE START-TO-END VIDEO NARRATIVE REPORT ──
+    narrative_data = s.get("narrative_report") or VideoNarrativeEngine.generate_video_narrative(s)
+
+    st.markdown("#### 📖 Complete Start-to-End Surveillance Narrative Report")
+    
+    # Executive Story Card
+    st.markdown(
+        f'<div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); border: 1px solid #3b82f6; border-left: 4px solid #60a5fa; border-radius: 8px; padding: 14px 18px; margin-bottom: 14px;">'
+        f'<div style="font-size: 11px; font-weight: 800; color: #93c5fd; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">🎯 Executive Surveillance Story</div>'
+        f'<div style="font-size: 13px; line-height: 1.6; color: #f1f5f9;">{narrative_data.get("executive_summary", "")}</div>'
+        f'</div>',
+        unsafe_allow_html=True
     )
-    st.info(f"**📖 Situational Narrative:** {what_happened_str}")
+
+    # 3 Chronological Phase Story Cards (Start -> Middle -> End)
+    phases = narrative_data.get("chronological_story", [])
+    if phases:
+        p_cols = st.columns(len(phases))
+        for idx, ph in enumerate(phases):
+            with p_cols[idx]:
+                phase_title = ph.get("phase", f"Phase {idx+1}")
+                phase_time = ph.get("timestamp_range", "")
+                phase_text = ph.get("narrative", "")
+                st.markdown(
+                    f'<div style="background: #0b1329; border: 1px solid #1e293b; border-top: 3px solid #38bdf8; border-radius: 6px; padding: 12px; height: 100%; font-size: 12px;">'
+                    f'<div style="font-weight: 700; color: #38bdf8; margin-bottom: 2px;">{phase_title}</div>'
+                    f'<div style="font-size: 10px; font-family: monospace; color: #94a3b8; margin-bottom: 8px;">⏱ {phase_time}</div>'
+                    f'<div style="color: #cbd5e1; line-height: 1.5;">{phase_text}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+    # Export & Download Option for the Narrative
+    exp_c1, exp_c2 = st.columns([3, 1])
+    with exp_c1:
+        st.caption("✨ *Deterministic offline narrative synthesized from ByteTrack Kalman trajectories, spatial zones & context events (100% Offline / Zero API / Zero Cloud Latency).*")
+    with exp_c2:
+        st.download_button(
+            "📥 Export Full Narrative (.txt)",
+            data=narrative_data.get("full_narrative_text", ""),
+            file_name=f"IBVAPX_Narrative_Report_{s['camera_id']}.txt",
+            mime="text/plain",
+            use_container_width=True,
+            key="btn_download_narrative"
+        )
 
     # ── 4. OPERATOR TACTICAL RESPONSE BAR ──
     if alert_obj:

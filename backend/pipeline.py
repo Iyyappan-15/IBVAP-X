@@ -25,9 +25,9 @@ class IBVAPXPipeline:
     Completely decoupled from Streamlit and FastAPI — both act as clients.
     """
 
-    def __init__(self, config_path: str = "data/config/cameras.json", enable_demo_degradation: bool = False):
+    def __init__(self, config_path: str = "data/config/cameras.json", enable_demo_degradation: bool = False, min_track_persistence: int = 1):
         self.detector = ObjectDetector()
-        self.tracker = ObjectTracker()
+        self.tracker = ObjectTracker(min_persistence=min_track_persistence)
         self.context_engine = ContextEngine(config_path=config_path)
         self.reliability_engine = CameraReliabilityEngine()
         self.anomaly_detector = AnomalyDetector()

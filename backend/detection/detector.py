@@ -223,7 +223,7 @@ class ObjectDetector:
                 roi_img = image_np[ry1:ry2, rx1:rx2]
                 try:
                     # Neural crop inference: ONLY accept actual objects confirmed by neural network
-                    crop_results = self.model(roi_img, conf=0.15, verbose=False)
+                    crop_results = self.model(roi_img, conf=0.28, verbose=False)
                     for cr in crop_results:
                         if cr.boxes is not None and len(cr.boxes) > 0:
                             for cbox in cr.boxes:
@@ -299,12 +299,12 @@ class ObjectDetector:
         except Exception:
             yolo_input = image_np
 
-        effective_conf = max(0.15, self.confidence_threshold - 0.08) if is_low_contrast else self.confidence_threshold
+        effective_conf = max(0.18, self.confidence_threshold - 0.05) if is_low_contrast else self.confidence_threshold
 
-        # 2. Run YOLO inference
+        # 2. Run YOLO inference with clean floor (min 0.20)
         results = self.model(
             yolo_input,
-            conf=min(0.08, effective_conf),
+            conf=min(0.20, effective_conf),
             iou=0.45,
             agnostic_nms=True,
             imgsz=640,
@@ -325,8 +325,17 @@ class ObjectDetector:
                 cls_id = int(box.cls[0].cpu().numpy())
                 cls_name = self.model.names.get(cls_id, f"class_{cls_id}").lower()
 
-                # Lower threshold (0.08) specifically for animals (dog/cat) and held items (bottle) on snow/fog feeds
-                min_conf = 0.08 if cls_name in ("dog", "cat", "bottle") else effective_conf
+                # Calibrated thresholds to eliminate hallucinations:
+                # - Animals (dog/cat): 0.20 to catch low-profile quadrupeds in snow
+                # - Handheld items (bottle, knife, cell phone, cup): 0.28 to prevent noise flickers
+                # - Standard objects (person, car, etc.): effective_conf (default 0.30)
+                if cls_name in ("dog", "cat"):
+                    min_conf = min(0.20, effective_conf)
+                elif cls_name in ("bottle", "knife", "cell phone", "cup"):
+                    min_conf = max(0.28, effective_conf)
+                else:
+                    min_conf = effective_conf
+
                 if conf < min_conf:
                     continue
 
